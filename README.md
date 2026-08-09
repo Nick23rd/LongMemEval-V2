@@ -24,6 +24,9 @@ This is the official LongMemEval-V2 repository. It contains the public
 evaluation harness, data preparation tools, leaderboard packaging utilities,
 and the memory baselines reported with the benchmark.
 
+## News 
+- [2026/08] Update: [AgentRunbook-C V2](https://xiaowu0162.github.io/longmemeval-v2/agentrunbook-c-v2/).
+
 ## Overview
 
 LongMemEval-V2 evaluates whether memory systems can help agents acquire the
