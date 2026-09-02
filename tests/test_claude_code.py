@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from memory_modules.memory import MEMORY_TYPES
@@ -44,3 +45,39 @@ def test_claude_command_and_working_directory() -> None:
         "--debug",
     ]
     assert memory._process_cwd(sandbox_dir=sandbox_dir) == sandbox_dir
+
+
+def test_claude_result_usage_is_normalized() -> None:
+    memory = object.__new__(ClaudeCodeMemory)
+    payload = {
+        "type": "result",
+        "duration_api_ms": 1200,
+        "duration_ms": 1400,
+        "num_turns": 7,
+        "total_cost_usd": 0.25,
+        "usage": {
+            "input_tokens": 100,
+            "cache_creation_input_tokens": 20,
+            "cache_read_input_tokens": 300,
+            "output_tokens": 40,
+        },
+        "modelUsage": {
+            "test-model": {
+                "inputTokens": 100,
+                "outputTokens": 40,
+                "costUSD": 0.25,
+            }
+        },
+    }
+
+    events, usage = memory._parse_process_output(json.dumps(payload))
+
+    assert events == [payload]
+    assert usage is not None
+    assert usage["input_tokens"] == 100
+    assert usage["cache_read_input_tokens"] == 300
+    assert usage["output_tokens"] == 40
+    assert usage["total_tokens"] == 460
+    assert usage["num_turns"] == 7
+    assert usage["total_cost_usd"] == 0.25
+    assert usage["model_usage"] == payload["modelUsage"]

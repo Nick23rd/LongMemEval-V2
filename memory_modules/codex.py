@@ -291,9 +291,9 @@ def read_memory_output_status(
     return MemoryOutputStatus("finished", None)
 
 
-def parse_codex_json_events(raw_stdout: str) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
+def parse_codex_json_events(raw_stdout: str) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     events: list[dict[str, Any]] = []
-    usage: dict[str, int] | None = None
+    usage: dict[str, Any] | None = None
     for line in raw_stdout.splitlines():
         stripped = line.strip()
         if not stripped.startswith("{"):
@@ -800,6 +800,12 @@ class CodexMemory(Memory):
         """Return an optional working directory for the code-agent process."""
         return None
 
+    def _parse_process_output(
+        self,
+        raw_stdout: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        return parse_codex_json_events(raw_stdout)
+
     def _load_stored_trajectory(self, trajectory_id: str) -> dict[str, Any] | None:
         require(
             self.workspace_dir is not None,
@@ -1018,7 +1024,7 @@ class CodexMemory(Memory):
         duration_seconds = time.time() - started_at_ts
         stdout_path.write_text(stdout_text, encoding="utf-8")
         stderr_path.write_text(stderr_text, encoding="utf-8")
-        events, usage = parse_codex_json_events(stdout_text)
+        events, usage = self._parse_process_output(stdout_text)
         if events:
             save_json(events_path, events)
 

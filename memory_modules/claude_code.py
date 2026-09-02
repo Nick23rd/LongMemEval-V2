@@ -1,6 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from .codex import DEFAULT_PROMPT, CodexMemory, ensure_string_list
 from .memory import MemoryConfig, register_memory, require
@@ -152,3 +153,46 @@ class ClaudeCodeMemory(CodexMemory):
 
     def _process_cwd(self, *, sandbox_dir: Path) -> Path | None:
         return sandbox_dir
+
+    def _parse_process_output(
+        self,
+        raw_stdout: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        events: list[dict[str, Any]] = []
+        result_payload: dict[str, Any] | None = None
+        for line in raw_stdout.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("{"):
+                continue
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            events.append(payload)
+            if payload.get("type") == "result":
+                result_payload = payload
+        if result_payload is None:
+            return events, None
+
+        raw_usage = result_payload.get("usage")
+        usage: dict[str, Any] = dict(raw_usage) if isinstance(raw_usage, dict) else {}
+        for key in ("num_turns", "total_cost_usd", "duration_api_ms", "duration_ms"):
+            value = result_payload.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                usage[key] = value
+        model_usage = result_payload.get("modelUsage")
+        if isinstance(model_usage, dict):
+            usage["model_usage"] = model_usage
+
+        token_keys = (
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+        )
+        token_values = [usage.get(key) for key in token_keys]
+        if all(isinstance(value, int) and not isinstance(value, bool) for value in token_values):
+            usage["total_tokens"] = sum(token_values)
+        return events, usage or None
