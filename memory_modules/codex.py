@@ -122,7 +122,25 @@ def load_json(path: Path) -> Any:
 def relative_symlink(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     relative_target = os.path.relpath(src, start=dst.parent)
-    dst.symlink_to(relative_target)
+    try:
+        dst.symlink_to(relative_target, target_is_directory=src.is_dir())
+        return
+    except OSError:
+        if os.name != "nt":
+            raise
+    if src.is_dir():
+        result = subprocess.run(
+            ["cmd.exe", "/c", "mklink", "/J", str(dst), str(src.resolve())],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        require(
+            result.returncode == 0 and dst.exists(),
+            f"Failed to create directory junction {dst}: {result.stderr.strip()}",
+        )
+    else:
+        shutil.copy2(src, dst)
 
 
 def normalize_trajectory_pool_root(pool_root: Path) -> Path:
@@ -778,6 +796,10 @@ class CodexMemory(Memory):
         command.append(self.codex_prompt)
         return command
 
+    def _process_cwd(self, *, sandbox_dir: Path) -> Path | None:
+        """Return an optional working directory for the code-agent process."""
+        return None
+
     def _load_stored_trajectory(self, trajectory_id: str) -> dict[str, Any] | None:
         require(
             self.workspace_dir is not None,
@@ -954,7 +976,10 @@ class CodexMemory(Memory):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 start_new_session=(os.name == "posix"),
+                cwd=self._process_cwd(sandbox_dir=sandbox_dir),
             )
             while True:
                 elapsed_seconds = time.time() - started_at_ts

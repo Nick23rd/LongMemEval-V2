@@ -24,6 +24,7 @@ METHODS = {
     "rag_query_to_slice_notes",
     "agentrunbook_r",
     "codex",
+    "claude_code",
     "agentrunbook_c",
     "agentrunbook_c_v2",
 }
@@ -97,6 +98,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codex-reasoning-effort", default=os.getenv("CODEX_REASONING_EFFORT", "xhigh"))
     parser.add_argument("--codex-timeout-seconds", type=float, default=float(os.getenv("CODEX_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--codex-max-retries", type=int, default=int(os.getenv("CODEX_MAX_RETRIES", "3")))
+    parser.add_argument("--claude-binary", default=os.getenv("CLAUDE_BINARY", "claude"))
+    parser.add_argument("--claude-model", default=os.getenv("CLAUDE_MODEL", "sonnet"))
+    parser.add_argument("--claude-effort", default=os.getenv("CLAUDE_EFFORT"))
+    parser.add_argument("--claude-timeout-seconds", type=float, default=float(os.getenv("CLAUDE_TIMEOUT_SECONDS", "1800")))
+    parser.add_argument("--claude-max-retries", type=int, default=int(os.getenv("CLAUDE_MAX_RETRIES", "3")))
+    parser.add_argument("--claude-max-turns", type=int, default=int(os.getenv("CLAUDE_MAX_TURNS", "30")))
+    parser.add_argument("--claude-version-label", default=os.getenv("CLAUDE_VERSION_LABEL"))
+    parser.add_argument(
+        "--claude-bare",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("CLAUDE_BARE", False),
+        help="Disable Claude Code customizations and auto memory (requires a version supporting --bare).",
+    )
+    parser.add_argument(
+        "--claude-no-session-persistence",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("CLAUDE_NO_SESSION_PERSISTENCE", True),
+    )
     parser.add_argument("--openai-sdk-model", default=os.getenv("OPENAI_SDK_MODEL", "gpt-5.4-mini"))
     parser.add_argument(
         "--openai-sdk-reasoning-effort",
@@ -241,6 +260,26 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                 "evidence_mode": "both",
                 "trajectory_pool_root": None,
                 "codex_params": codex_params,
+            },
+        }
+    if args.method == "claude_code":
+        return {
+            "memory_type": "claude_code",
+            "memory_params": {
+                "evidence_mode": "both",
+                "trajectory_pool_root": None,
+                "claude_params": {
+                    "binary": args.claude_binary,
+                    "model": args.claude_model,
+                    "effort": args.claude_effort,
+                    "timeout_seconds": args.claude_timeout_seconds,
+                    "max_retries": args.claude_max_retries,
+                    "max_turns": args.claude_max_turns,
+                    "bare": args.claude_bare,
+                    "no_session_persistence": args.claude_no_session_persistence,
+                    "version_label": args.claude_version_label,
+                    "extra_args": [],
+                },
             },
         }
     if args.method == "agentrunbook_c_v2":

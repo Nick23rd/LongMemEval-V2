@@ -75,6 +75,7 @@ The repository implements the following memory modules:
   notes.
 - `agentrunbook_r`: AgentRunbook-R.
 - `codex`: vanilla Codex coding-agent memory baseline.
+- `claude_code`: Claude Code coding-agent memory baseline.
 - `agentrunbook_c`: AgentRunbook-C.
 
 ## Setup: Environment
@@ -156,6 +157,22 @@ export CODEX_MODEL=gpt-5.4-mini
 export CODEX_REASONING_EFFORT=xhigh
 ```
 
+For Claude Code:
+
+```bash
+export CLAUDE_BINARY=/path/to/versioned/claude
+export CLAUDE_MODEL=sonnet
+export CLAUDE_VERSION_LABEL=2.1.0
+```
+
+Use a separate versioned binary and output root for each comparison. Set
+`CLAUDE_BARE=true` when every tested Claude Code version supports `--bare` to
+disable CLAUDE.md, plugins, MCP servers, skills, hooks, and auto memory. Session
+persistence is disabled by default. The detected `claude --version` output is
+saved in the memory configuration for experiment provenance.
+Set `CLAUDE_EFFORT=high` only when all compared versions support the
+`--effort` flag; leaving it unset improves compatibility with older releases.
+
 Codex also expects common command-line tools such as `rg` and `find`.
 
 ## Reproducing Baselines
@@ -172,6 +189,7 @@ evaluation/scripts/run_rag_query_to_slice.sh
 evaluation/scripts/run_rag_query_to_slice_notes.sh
 evaluation/scripts/run_agentrunbook_r.sh
 evaluation/scripts/run_codex.sh
+evaluation/scripts/run_claude_code.sh
 evaluation/scripts/run_agentrunbook_c.sh
 ```
 
