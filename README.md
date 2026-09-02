@@ -173,6 +173,10 @@ saved in the memory configuration for experiment provenance.
 Set `CLAUDE_EFFORT=high` only when all compared versions support the
 `--effort` flag; leaving it unset improves compatibility with older releases.
 
+For third-party model configuration, executable-path maintenance, and the
+workflow for adding another coding-agent tool such as OpenCode, see
+[Coding-Agent CLI Configuration and Integration](docs/coding-agent-tools.md).
+
 Codex also expects common command-line tools such as `rg` and `find`.
 
 ## Reproducing Baselines
