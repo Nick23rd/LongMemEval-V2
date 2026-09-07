@@ -185,6 +185,9 @@ $env:CODEAGENT_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.
 The auto-memory experiment uses a separate configuration namespace and a
 two-stage build/evaluate workflow:
 
+See [the Chinese manual testing guide](docs/free_code_auto_memory_manual_test.zh-CN.md)
+for preflight checks, smoke tests, artifact inspection, and troubleshooting.
+
 ```powershell
 $env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
 $env:DATA_ROOT = 'D:\path\to\longmemeval-v2'
