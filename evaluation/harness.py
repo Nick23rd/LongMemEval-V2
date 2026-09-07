@@ -274,6 +274,7 @@ def inject_runtime_memory_params(
         "rag",
         "agentrunbook_r",
         "codex",
+        "free_code_auto_memory",
         "agentrunbook_c",
         "agentrunbook_c_v2",
     }:
@@ -283,7 +284,7 @@ def inject_runtime_memory_params(
     runtime_config["memory_params"]["trajectories_root_dir"] = str(
         Path(trajectories_path).resolve().parent
     )
-    if runtime_config["memory_type"] in {"codex", "agentrunbook_c", "agentrunbook_c_v2"} and query_trace_dir is not None:
+    if runtime_config["memory_type"] in {"codex", "free_code_auto_memory", "agentrunbook_c", "agentrunbook_c_v2"} and query_trace_dir is not None:
         runtime_config["memory_params"]["query_trace_dir"] = str(query_trace_dir.resolve())
     if runtime_config["memory_type"] == "agent_runbook":
         generation_params_obj = runtime_config["memory_params"].get("generation_params", {})
@@ -1095,6 +1096,7 @@ def main() -> None:
             "rag",
             "agentrunbook_r",
             "codex",
+            "free_code_auto_memory",
             "agentrunbook_c",
             "agentrunbook_c_v2",
         }:
@@ -1181,7 +1183,15 @@ def main() -> None:
         shared_haystack_ids = haystack_mapping[question_ids[0]]
         if args.load_memory_dir is not None:
             print("All questions share the same haystack, loading shared memory once for all questions.")
-            shared_memory = load_memory(args.load_memory_dir, requested_config=memory_config_template)
+            requested_config = memory_config_template
+            if requested_config is not None and requested_config["memory_type"] == "free_code_auto_memory":
+                requested_config = inject_runtime_memory_params(
+                    requested_config,
+                    workspace_dir=memory_workspace_root / "shared",
+                    trajectories_path=args.trajectories_path,
+                    query_trace_dir=output_dir / "query_traces",
+                )
+            shared_memory = load_memory(args.load_memory_dir, requested_config=requested_config)
             shared_memory.configure_runtime(
                 query_trace_dir=output_dir / "query_traces",
                 generation_temperature=args.temperature,

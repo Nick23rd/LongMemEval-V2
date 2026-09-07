@@ -226,6 +226,7 @@ from .no_retrieval import NoRetrievalMemory  # noqa: E402,F401
 from .codex import CodexMemory  # noqa: E402,F401
 from .claude_code import ClaudeCodeMemory  # noqa: E402,F401
 from .codeagent import CodeAgentMemory  # noqa: E402,F401
+from .free_code_auto_memory import FreeCodeAutoMemory  # noqa: E402,F401
 from .agentrunbook_c import AgentRunbookC  # noqa: E402,F401
 from .agentrunbook_c_v2 import AgentRunbookCV2  # noqa: E402,F401
 from .agentrunbook_r import AgentRunbookR  # noqa: E402,F401

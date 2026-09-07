@@ -26,6 +26,7 @@ METHODS = {
     "codex",
     "claude_code",
     "codeagent",
+    "free_code_auto_memory",
     "agentrunbook_c",
     "agentrunbook_c_v2",
 }
@@ -134,6 +135,16 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=env_bool("CODEAGENT_NO_SESSION_PERSISTENCE", True),
     )
+    parser.add_argument("--free-code-binary", default=os.getenv("FREE_CODE_BINARY", "codeagentcli"))
+    parser.add_argument("--free-code-model", default=os.getenv("FREE_CODE_MODEL"))
+    parser.add_argument("--free-code-timeout-seconds", type=float, default=float(os.getenv("FREE_CODE_TIMEOUT_SECONDS", "1800")))
+    parser.add_argument("--free-code-ingest-max-turns", type=int, default=int(os.getenv("FREE_CODE_INGEST_MAX_TURNS", "30")))
+    parser.add_argument("--free-code-query-max-turns", type=int, default=int(os.getenv("FREE_CODE_QUERY_MAX_TURNS", "20")))
+    parser.add_argument("--free-code-max-retries", type=int, default=int(os.getenv("FREE_CODE_MAX_RETRIES", "3")))
+    parser.add_argument("--free-code-require-memory-write", action=argparse.BooleanOptionalAction, default=env_bool("FREE_CODE_REQUIRE_MEMORY_WRITE", False))
+    parser.add_argument("--save-memory", action="store_true")
+    parser.add_argument("--skip-evaluation", action="store_true")
+    parser.add_argument("--load-memory-dir")
     parser.add_argument("--openai-sdk-model", default=os.getenv("OPENAI_SDK_MODEL", "gpt-5.4-mini"))
     parser.add_argument(
         "--openai-sdk-reasoning-effort",
@@ -320,6 +331,22 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                 },
             },
         }
+    if args.method == "free_code_auto_memory":
+        return {
+            "memory_type": "free_code_auto_memory",
+            "memory_params": {
+                "free_code_params": {
+                    "binary": args.free_code_binary,
+                    "model": args.free_code_model,
+                    "timeout_seconds": args.free_code_timeout_seconds,
+                    "ingest_max_turns": args.free_code_ingest_max_turns,
+                    "query_max_turns": args.free_code_query_max_turns,
+                    "max_retries": args.free_code_max_retries,
+                    "require_memory_write": args.free_code_require_memory_write,
+                    "extra_args": [],
+                }
+            },
+        }
     if args.method == "agentrunbook_c_v2":
         memory_params: dict[str, object] = {
             "evidence_mode": "both",
@@ -349,6 +376,12 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
 
 def main() -> None:
     args = parse_args()
+    if args.skip_evaluation and not args.save_memory:
+        raise SystemExit("--skip-evaluation requires --save-memory")
+    if args.load_memory_dir and args.save_memory:
+        raise SystemExit("--load-memory-dir cannot be combined with --save-memory")
+    if (args.save_memory or args.skip_evaluation or args.load_memory_dir) and args.method != "free_code_auto_memory":
+        raise SystemExit("two-stage memory flags are only supported with --method free_code_auto_memory")
     if args.enable_online_learning and args.method != "agentrunbook_c_v2":
         raise SystemExit("--enable-online-learning is only supported with --method agentrunbook_c_v2")
     if args.enable_online_learning and args.prompt_build_max_workers != 1:
@@ -422,6 +455,12 @@ def main() -> None:
         harness_argv.append("--reader-disable-thinking")
     if args.shuffle_questions_seed is not None:
         harness_argv.extend(["--shuffle-questions-seed", str(args.shuffle_questions_seed)])
+    if args.save_memory:
+        harness_argv.append("--save-memory")
+    if args.skip_evaluation:
+        harness_argv.append("--skip-evaluation")
+    if args.load_memory_dir:
+        harness_argv.extend(["--load-memory-dir", args.load_memory_dir])
     print(json.dumps({"runtime_dir": str(runtime_dir), "method": args.method}, indent=2))
     old_argv = sys.argv
     try:

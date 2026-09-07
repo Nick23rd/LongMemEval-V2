@@ -1,0 +1,15 @@
+{
+  "memory_type": "free_code_auto_memory",
+  "memory_params": {
+    "free_code_params": {
+      "binary": "codeagentcli",
+      "model": null,
+      "timeout_seconds": 1800.0,
+      "ingest_max_turns": 30,
+      "query_max_turns": 20,
+      "max_retries": 3,
+      "require_memory_write": false,
+      "extra_args": []
+    }
+  }
+}

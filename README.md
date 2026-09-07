@@ -77,6 +77,7 @@ The repository implements the following memory modules:
 - `codex`: vanilla Codex coding-agent memory baseline.
 - `claude_code`: Claude Code coding-agent memory baseline.
 - `codeagent`: CodeAgent coding-agent memory baseline.
+- `free_code_auto_memory`: CodeAgent native auto-memory formation and isolated recall baseline.
 - `agentrunbook_c`: AgentRunbook-C.
 
 ## Setup: Environment
@@ -181,6 +182,20 @@ export CODEAGENT_BINARY=/path/to/codeagentcli
 $env:CODEAGENT_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
 ```
 
+The auto-memory experiment uses a separate configuration namespace and a
+two-stage build/evaluate workflow:
+
+```powershell
+$env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
+$env:DATA_ROOT = 'D:\path\to\longmemeval-v2'
+$env:PHASE = 'build'
+bash evaluation/scripts/run_free_code_auto_memory.sh
+
+$env:PHASE = 'evaluate'
+$env:MEMORY_STATE = 'runs/free_code_auto_memory_build/memory_state'
+bash evaluation/scripts/run_free_code_auto_memory.sh
+```
+
 Use a separate versioned binary and output root for each comparison. Set
 `CLAUDE_BARE=true` when every tested Claude Code version supports `--bare` to
 disable CLAUDE.md, plugins, MCP servers, skills, hooks, and auto memory. Session
@@ -211,6 +226,7 @@ evaluation/scripts/run_agentrunbook_r.sh
 evaluation/scripts/run_codex.sh
 evaluation/scripts/run_claude_code.sh
 evaluation/scripts/run_codeagent.sh
+evaluation/scripts/run_free_code_auto_memory.sh
 evaluation/scripts/run_agentrunbook_c.sh
 ```
 
