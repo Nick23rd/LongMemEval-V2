@@ -140,6 +140,24 @@ class Memory(ABC):
         return None
 
 
+class StatefulMemory(Memory):
+    """Memory whose history ingestion and frozen query phases are distinct."""
+
+    resume_build: bool = False
+
+    def configure_ingestion_plan(self, metadata: dict[str, object]) -> None:
+        """Record how the harness selected and ordered history trajectories."""
+        return None
+
+    def finalize_build(self) -> None:
+        """Freeze a completed history build before queries or persistence."""
+        return None
+
+    def build_metrics(self) -> dict[str, object] | None:
+        """Return lifecycle metrics for the final run artifact."""
+        return None
+
+
 MEMORY_TYPES: dict[str, type[Memory]] = {}
 
 
@@ -226,7 +244,7 @@ from .no_retrieval import NoRetrievalMemory  # noqa: E402,F401
 from .codex import CodexMemory  # noqa: E402,F401
 from .claude_code import ClaudeCodeMemory  # noqa: E402,F401
 from .codeagent import CodeAgentMemory  # noqa: E402,F401
-from .free_code_auto_memory import FreeCodeAutoMemory  # noqa: E402,F401
+from .codeagent_auto_memory import CodeAgentAutoMemory  # noqa: E402,F401
 from .agentrunbook_c import AgentRunbookC  # noqa: E402,F401
 from .agentrunbook_c_v2 import AgentRunbookCV2  # noqa: E402,F401
 from .agentrunbook_r import AgentRunbookR  # noqa: E402,F401

@@ -1,6 +1,6 @@
 # CodeAgent Auto Memory 手动测试手册
 
-本文说明如何在 Windows PowerShell 中验证 `free_code_auto_memory`。建议按“静态检查 → fake CLI 单元测试 → 真实构建冒烟 → 加载记忆评测”的顺序执行。前两步不调用模型；真实构建和评测会产生模型用量。
+本文说明如何在 Windows PowerShell 中验证 `codeagent_auto_memory`。建议按“静态检查 → fake CLI 单元测试 → 真实构建冒烟 → 加载记忆评测”的顺序执行。前两步不调用模型；真实构建和评测会产生模型用量。
 
 ## 1. 进入仓库并选择 Python
 
@@ -24,8 +24,8 @@ if (-not (Test-Path $Python)) { $Python = 'python' }
 当前本地构建路径为：
 
 ```powershell
-$env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
-& $env:FREE_CODE_BINARY --version
+$env:CODEAGENT_AUTO_MEMORY_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
+& $env:CODEAGENT_AUTO_MEMORY_BINARY --version
 ```
 
 预期能看到类似输出：
@@ -42,13 +42,13 @@ $env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.
 
 ```powershell
 & $Python -m compileall -q memory_modules evaluation tests
-& $Python evaluation/run_eval.py --help | Select-String 'free_code_auto_memory|free-code|save-memory|load-memory'
+& $Python evaluation/run_eval.py --help | Select-String 'codeagent_auto_memory|CodeAgent|save-memory|load-memory'
 ```
 
 运行 fake CLI 单元测试：
 
 ```powershell
-& $Python -m pytest tests/test_free_code_auto_memory.py -q
+& $Python -m pytest tests/test_codeagent_auto_memory.py -q
 ```
 
 该测试验证：
@@ -56,7 +56,7 @@ $env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.
 - backend 已注册；
 - ingestion 与 query 使用不同进程调用；
 - 命令不包含 `--resume`、`--continue` 或 `--bare`；
-- ingestion 共享同一个隔离 auto-memory 目录；
+- 每次 ingestion 在独立临时目录中运行，成功后才提交到主 auto-memory；
 - query 在系统临时目录运行，看不到 trajectory；
 - 每题使用独立 memory 快照；
 - query 写入不会修改主记忆；
@@ -65,7 +65,7 @@ $env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.
 预期结果：
 
 ```text
-2 passed
+4 passed
 ```
 
 ## 4. 准备数据集
@@ -93,19 +93,20 @@ Test-Path "$env:DATA_ROOT\trajectories.jsonl"
 先用一道题验证完整的记忆形成和保存链路：
 
 ```powershell
-$BuildDir = 'runs\free_code_auto_memory_smoke_build'
+$BuildDir = 'runs\codeagent_auto_memory_smoke_build'
 
 & $Python evaluation/run_eval.py `
-  --method free_code_auto_memory `
+  --method codeagent_auto_memory `
   --data-root $env:DATA_ROOT `
   --domain web `
   --tier small `
   --limit 1 `
   --output-dir $BuildDir `
-  --free-code-binary $env:FREE_CODE_BINARY `
-  --free-code-ingest-max-turns 10 `
-  --free-code-query-max-turns 10 `
-  --free-code-max-retries 1 `
+  --codeagent-auto-memory-binary $env:CODEAGENT_AUTO_MEMORY_BINARY `
+  --codeagent-auto-memory-ingest-max-turns 10 `
+  --codeagent-auto-memory-query-max-turns 10 `
+  --codeagent-auto-memory-ingest-max-attempts 1 `
+  --codeagent-auto-memory-query-max-attempts 1 `
   --save-memory `
   --skip-evaluation
 ```
@@ -123,7 +124,7 @@ Get-Content "$BuildDir\memory_state\ingestion_manifest.json" -TotalCount 80
 重点关注：
 
 - `trajectory_count` 是否符合所选 haystack；
-- `success_count`、`empty_ingestion_count` 和 `failed_count`；
+- `success_count`、`empty_ingestion_count` 和 `failed_attempt_count`；
 - `memory_file_count` 与 `memory_total_bytes` 是否大于零；
 - `usage_totals` 和 `total_duration_seconds` 是否被记录；
 - `trajectory_ids` 是否保持 haystack 顺序；
@@ -138,8 +139,16 @@ Get-Content "$BuildDir\memory_state\ingestion_manifest.json" -TotalCount 80
 其中包含当前 trajectory、`stdout.log`、`stderr.log` 和 `summary.json`。若 `require_memory_write=false`，没有写入记忆的会话会记录为 `empty_ingestion` 并继续构建。需要把这种情况直接视为错误时，加上：
 
 ```text
---free-code-require-memory-write
+--codeagent-auto-memory-require-memory-write
 ```
+
+构建中断后，可用同一个输出目录恢复。必须保持其余构建参数一致，并增加：
+
+```text
+--codeagent-auto-memory-resume-build
+```
+
+框架会核对已完成 trajectory 的内容指纹并跳过它们；最后一次失败的尝试不会写入主记忆。
 
 ## 6. 加载冻结记忆进行评测
 
@@ -151,25 +160,26 @@ $env:READER_MODEL = 'Qwen/Qwen3.5-9B'
 $env:OPENAI_API_KEY = '<本地服务所需的值>'
 
 $MemoryState = Resolve-Path "$BuildDir\memory_state"
-$EvalDir = 'runs\free_code_auto_memory_smoke_evaluate'
+$EvalDir = 'runs\codeagent_auto_memory_smoke_evaluate'
 
 & $Python evaluation/run_eval.py `
-  --method free_code_auto_memory `
+  --method codeagent_auto_memory `
   --data-root $env:DATA_ROOT `
   --domain web `
   --tier small `
   --limit 1 `
   --output-dir $EvalDir `
-  --free-code-binary $env:FREE_CODE_BINARY `
-  --free-code-ingest-max-turns 10 `
-  --free-code-query-max-turns 10 `
-  --free-code-max-retries 1 `
+  --codeagent-auto-memory-binary $env:CODEAGENT_AUTO_MEMORY_BINARY `
+  --codeagent-auto-memory-ingest-max-turns 10 `
+  --codeagent-auto-memory-query-max-turns 10 `
+  --codeagent-auto-memory-ingest-max-attempts 1 `
+  --codeagent-auto-memory-query-max-attempts 1 `
   --reader-base-url $env:READER_BASE_URL `
   --reader-model $env:READER_MODEL `
   --load-memory-dir $MemoryState
 ```
 
-阶段 B 的 free-code 参数必须与阶段 A 一致，包括 binary、model、turn limits、重试次数和 `require_memory_write`。不一致时框架会拒绝加载，防止把不同实验配置混在一起。
+阶段 B 的 CodeAgent 参数必须与阶段 A 一致，包括 binary、model、turn limits、重试次数和 `require_memory_write`。不一致时框架会拒绝加载，防止把不同实验配置混在一起。
 
 完成后检查：
 
@@ -191,24 +201,24 @@ Get-ChildItem "$EvalDir\memory_workspaces\shared\query_sessions" -Recurse -Filte
 $env:PHASE = 'build'
 $env:DOMAIN = 'web'
 $env:TIER = 'small'
-$env:OUTPUT_DIR = 'runs/free_code_auto_memory_build_01'
-bash evaluation/scripts/run_free_code_auto_memory.sh --limit 1 --free-code-ingest-max-turns 10
+$env:OUTPUT_DIR = 'runs/codeagent_auto_memory_build_01'
+bash evaluation/scripts/run_codeagent_auto_memory.sh --limit 1 --codeagent-auto-memory-ingest-max-turns 10
 ```
 
 阶段 B：
 
 ```powershell
 $env:PHASE = 'evaluate'
-$env:MEMORY_STATE = (Resolve-Path 'runs/free_code_auto_memory_build_01/memory_state').Path
-$env:OUTPUT_DIR = 'runs/free_code_auto_memory_evaluate_01'
-bash evaluation/scripts/run_free_code_auto_memory.sh --limit 1 --free-code-ingest-max-turns 10
+$env:MEMORY_STATE = (Resolve-Path 'runs/codeagent_auto_memory_build_01/memory_state').Path
+$env:OUTPUT_DIR = 'runs/codeagent_auto_memory_evaluate_01'
+bash evaluation/scripts/run_codeagent_auto_memory.sh --limit 1 --codeagent-auto-memory-ingest-max-turns 10
 ```
 
 不设置 `OUTPUT_DIR` 时，默认分别使用：
 
 ```text
-runs/free_code_auto_memory_build
-runs/free_code_auto_memory_evaluate
+runs/codeagent_auto_memory_build
+runs/codeagent_auto_memory_evaluate
 ```
 
 ## 8. 扩展到 Small tier
@@ -242,14 +252,14 @@ CODEAGENT3_DISABLE_AUTO_MEMORY=0
 
 ### 提示配置不匹配，无法加载
 
-阶段 A 与阶段 B 的 `FREE_CODE_*` 环境变量或命令行参数不同。复制阶段 A 的参数重新运行阶段 B；不要手工修改保存的 `memory_config.json`。
+阶段 A 与阶段 B 的 `CODEAGENT_AUTO_MEMORY_*` 环境变量或命令行参数不同。复制阶段 A 的参数重新运行阶段 B；不要手工修改保存的 `memory_config.json`。
 
 ### 输出目录已存在
 
 换用新的输出目录。若旧运行仍有分析价值，先重命名保存：
 
 ```powershell
-Move-Item runs\free_code_auto_memory_smoke_build runs\free_code_auto_memory_smoke_build_old
+Move-Item runs\codeagent_auto_memory_smoke_build runs\codeagent_auto_memory_smoke_build_old
 ```
 
 ### Reader 连接失败

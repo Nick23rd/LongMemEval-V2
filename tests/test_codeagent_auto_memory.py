@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from memory_modules.memory import MEMORY_TYPES, load_memory, save_memory
+from evaluation.memory_lifecycle import build_stateful_memory
 
 
-FreeCodeAutoMemory = MEMORY_TYPES["free_code_auto_memory"]
+CodeAgentAutoMemory = MEMORY_TYPES["codeagent_auto_memory"]
 
 
 def _trajectory(screenshot: Path, trajectory_id: str = "traj/one") -> dict[str, object]:
@@ -27,25 +28,27 @@ def _trajectory(screenshot: Path, trajectory_id: str = "traj/one") -> dict[str, 
     }
 
 
-def _config(workspace: Path, trajectories_root: Path) -> dict[str, object]:
+def _config(workspace: Path, trajectories_root: Path, *, resume_build: bool = False) -> dict[str, object]:
     return {
         "workspace_dir": str(workspace),
         "trajectories_root_dir": str(trajectories_root),
-        "free_code_params": {
+        "codeagent_auto_memory_params": {
             "binary": "fake-codeagent",
             "model": None,
             "timeout_seconds": 5,
             "ingest_max_turns": 3,
             "query_max_turns": 2,
-            "max_retries": 2,
+            "ingest_max_attempts": 2,
+            "query_max_attempts": 2,
             "require_memory_write": True,
+            "resume_build": resume_build,
             "extra_args": [],
         },
     }
 
 
-def test_free_code_auto_memory_is_registered() -> None:
-    assert MEMORY_TYPES["free_code_auto_memory"] is FreeCodeAutoMemory
+def test_codeagent_auto_memory_is_registered() -> None:
+    assert MEMORY_TYPES["codeagent_auto_memory"] is CodeAgentAutoMemory
 
 
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
@@ -63,13 +66,15 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         memory_dir = Path(env["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"])
         assert env["CODEAGENT3_DISABLE_AUTO_MEMORY"] == "0"
         assert "--resume" not in command and "--continue" not in command and "--bare" not in command
+        assert "--dangerously-skip-permissions" not in command
         calls.append({"cwd": cwd, "memory_dir": memory_dir, "command": command})
-        if "ingestion_sessions" in cwd.parts:
+        if "--tools=Read,Write,Edit,Glob,Grep" in command:
             assert (cwd / "trajectory" / "trajectory.json").exists()
             memory_dir.mkdir(parents=True, exist_ok=True)
             (memory_dir / "MEMORY.md").write_text("Locale is zh-CN.\n", encoding="utf-8")
             result_text = "Memory saved"
         else:
+            assert "--tools=" in command
             assert not (cwd / "trajectory").exists()
             assert (cwd / "question.json").exists()
             result_text = "The remembered locale is zh-CN."
@@ -77,8 +82,8 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         payload = {"type": "result", "subtype": "success", "result": result_text, "usage": {"input_tokens": 2, "output_tokens": 1}}
         return subprocess.CompletedProcess(command, 0, json.dumps(payload) + "\n", "")
 
-    with patch("memory_modules.free_code_auto_memory.subprocess.run", side_effect=fake_run):
-        memory = FreeCodeAutoMemory(_config(workspace, tmp_path))
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(_config(workspace, tmp_path))
         memory.insert(_trajectory(screenshot))
         main_before = (workspace / "auto_memory" / "MEMORY.md").read_bytes()
         memory.set_query_context(query_invocation_id="question/one")
@@ -90,14 +95,70 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         saved = tmp_path / "saved"
         save_memory(memory, saved)
         requested = {
-            "memory_type": "free_code_auto_memory",
+            "memory_type": "codeagent_auto_memory",
             "memory_params": _config(tmp_path / "loaded-workspace", tmp_path),
         }
         loaded = load_memory(saved, requested_config=requested)
-        assert isinstance(loaded, FreeCodeAutoMemory)
+        assert isinstance(loaded, CodeAgentAutoMemory)
         assert loaded.inserted_trajectory_ids == ["traj/one"]
         assert (loaded.workspace_dir / "auto_memory" / "MEMORY.md").read_text(encoding="utf-8") == "Locale is zh-CN.\n"
 
     assert len(calls) == 2
-    assert calls[0]["memory_dir"] == (workspace / "auto_memory").resolve()
+    assert calls[0]["memory_dir"] != (workspace / "auto_memory").resolve()
     assert calls[1]["memory_dir"] != (workspace / "auto_memory").resolve()
+    assert calls[0]["memory_dir"] != calls[1]["memory_dir"]
+
+
+def test_failed_attempt_rolls_back_then_resume_skips_completed_trajectory(tmp_path: Path) -> None:
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+    workspace = tmp_path / "workspace"
+    attempts = 0
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "1.2.3\n", "")
+        attempts += 1
+        memory_dir = Path(kwargs["env"]["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"])
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        (memory_dir / "MEMORY.md").write_text(f"attempt {attempts}\n", encoding="utf-8")
+        if attempts == 1:
+            return subprocess.CompletedProcess(command, 1, "", "failed")
+        payload = {"type": "result", "subtype": "success", "result": "saved"}
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(_config(workspace, tmp_path))
+        build_stateful_memory(memory, ["traj/one"], {"traj/one": _trajectory(screenshot)})
+        assert (workspace / "auto_memory" / "MEMORY.md").read_text(encoding="utf-8") == "attempt 2\n"
+        manifest = json.loads((workspace / "ingestion_manifest.json").read_text(encoding="utf-8"))
+        assert manifest["build_status"] == "complete"
+        assert manifest["ingestion_plan"]["ordering_source"] == "haystack_order"
+
+        resumed = CodeAgentAutoMemory(_config(workspace, tmp_path, resume_build=True))
+        resumed.insert(_trajectory(screenshot))
+        assert attempts == 2
+
+
+def test_incomplete_saved_memory_is_rejected(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    saved = tmp_path / "saved"
+    saved.mkdir()
+    (saved / "auto_memory").mkdir()
+    config = {
+        "memory_type": "codeagent_auto_memory",
+        "memory_params": _config(workspace, tmp_path),
+    }
+    (saved / "memory_config.json").write_text(json.dumps(config), encoding="utf-8")
+    (saved / "ingestion_manifest.json").write_text(
+        json.dumps({"memory_type": "codeagent_auto_memory", "build_status": "partial_failed"}),
+        encoding="utf-8",
+    )
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run"):
+        try:
+            load_memory(saved, requested_config=config)
+        except RuntimeError as exc:
+            assert "not complete" in str(exc)
+        else:
+            raise AssertionError("incomplete memory should not load")

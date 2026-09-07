@@ -26,7 +26,7 @@ METHODS = {
     "codex",
     "claude_code",
     "codeagent",
-    "free_code_auto_memory",
+    "codeagent_auto_memory",
     "agentrunbook_c",
     "agentrunbook_c_v2",
 }
@@ -135,13 +135,15 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=env_bool("CODEAGENT_NO_SESSION_PERSISTENCE", True),
     )
-    parser.add_argument("--free-code-binary", default=os.getenv("FREE_CODE_BINARY", "codeagentcli"))
-    parser.add_argument("--free-code-model", default=os.getenv("FREE_CODE_MODEL"))
-    parser.add_argument("--free-code-timeout-seconds", type=float, default=float(os.getenv("FREE_CODE_TIMEOUT_SECONDS", "1800")))
-    parser.add_argument("--free-code-ingest-max-turns", type=int, default=int(os.getenv("FREE_CODE_INGEST_MAX_TURNS", "30")))
-    parser.add_argument("--free-code-query-max-turns", type=int, default=int(os.getenv("FREE_CODE_QUERY_MAX_TURNS", "20")))
-    parser.add_argument("--free-code-max-retries", type=int, default=int(os.getenv("FREE_CODE_MAX_RETRIES", "3")))
-    parser.add_argument("--free-code-require-memory-write", action=argparse.BooleanOptionalAction, default=env_bool("FREE_CODE_REQUIRE_MEMORY_WRITE", False))
+    parser.add_argument("--codeagent-auto-memory-binary", default=os.getenv("CODEAGENT_AUTO_MEMORY_BINARY", "codeagentcli"))
+    parser.add_argument("--codeagent-auto-memory-model", default=os.getenv("CODEAGENT_AUTO_MEMORY_MODEL"))
+    parser.add_argument("--codeagent-auto-memory-timeout-seconds", type=float, default=float(os.getenv("CODEAGENT_AUTO_MEMORY_TIMEOUT_SECONDS", "1800")))
+    parser.add_argument("--codeagent-auto-memory-ingest-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_TURNS", "30")))
+    parser.add_argument("--codeagent-auto-memory-query-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_MAX_TURNS", "20")))
+    parser.add_argument("--codeagent-auto-memory-ingest-max-attempts", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_ATTEMPTS", "1")))
+    parser.add_argument("--codeagent-auto-memory-query-max-attempts", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_MAX_ATTEMPTS", "3")))
+    parser.add_argument("--codeagent-auto-memory-require-memory-write", action=argparse.BooleanOptionalAction, default=env_bool("CODEAGENT_AUTO_MEMORY_REQUIRE_MEMORY_WRITE", False))
+    parser.add_argument("--codeagent-auto-memory-resume-build", action=argparse.BooleanOptionalAction, default=env_bool("CODEAGENT_AUTO_MEMORY_RESUME_BUILD", False))
     parser.add_argument("--save-memory", action="store_true")
     parser.add_argument("--skip-evaluation", action="store_true")
     parser.add_argument("--load-memory-dir")
@@ -331,18 +333,20 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                 },
             },
         }
-    if args.method == "free_code_auto_memory":
+    if args.method == "codeagent_auto_memory":
         return {
-            "memory_type": "free_code_auto_memory",
+            "memory_type": "codeagent_auto_memory",
             "memory_params": {
-                "free_code_params": {
-                    "binary": args.free_code_binary,
-                    "model": args.free_code_model,
-                    "timeout_seconds": args.free_code_timeout_seconds,
-                    "ingest_max_turns": args.free_code_ingest_max_turns,
-                    "query_max_turns": args.free_code_query_max_turns,
-                    "max_retries": args.free_code_max_retries,
-                    "require_memory_write": args.free_code_require_memory_write,
+                "codeagent_auto_memory_params": {
+                    "binary": args.codeagent_auto_memory_binary,
+                    "model": args.codeagent_auto_memory_model,
+                    "timeout_seconds": args.codeagent_auto_memory_timeout_seconds,
+                    "ingest_max_turns": args.codeagent_auto_memory_ingest_max_turns,
+                    "query_max_turns": args.codeagent_auto_memory_query_max_turns,
+                    "ingest_max_attempts": args.codeagent_auto_memory_ingest_max_attempts,
+                    "query_max_attempts": args.codeagent_auto_memory_query_max_attempts,
+                    "require_memory_write": args.codeagent_auto_memory_require_memory_write,
+                    "resume_build": args.codeagent_auto_memory_resume_build,
                     "extra_args": [],
                 }
             },
@@ -380,8 +384,8 @@ def main() -> None:
         raise SystemExit("--skip-evaluation requires --save-memory")
     if args.load_memory_dir and args.save_memory:
         raise SystemExit("--load-memory-dir cannot be combined with --save-memory")
-    if (args.save_memory or args.skip_evaluation or args.load_memory_dir) and args.method != "free_code_auto_memory":
-        raise SystemExit("two-stage memory flags are only supported with --method free_code_auto_memory")
+    if args.method == "codeagent_auto_memory" and args.prompt_build_max_workers != 1:
+        raise SystemExit("codeagent_auto_memory requires --prompt-build-max-workers 1")
     if args.enable_online_learning and args.method != "agentrunbook_c_v2":
         raise SystemExit("--enable-online-learning is only supported with --method agentrunbook_c_v2")
     if args.enable_online_learning and args.prompt_build_max_workers != 1:
@@ -416,8 +420,6 @@ def main() -> None:
         str(runtime_dir / "questions.json"),
         "--haystack-path",
         str(runtime_dir / "haystack.json"),
-        "--trajectories-path",
-        str(data_root / "trajectories.jsonl"),
         "--memory-config-path",
         str(memory_config_path),
         "--output-dir",
@@ -451,6 +453,8 @@ def main() -> None:
         "--evaluator-max-completion-tokens",
         str(args.evaluator_max_completion_tokens),
     ]
+    if not args.load_memory_dir:
+        harness_argv.extend(["--trajectories-path", str(data_root / "trajectories.jsonl")])
     if not args.reader_enable_thinking:
         harness_argv.append("--reader-disable-thinking")
     if args.shuffle_questions_seed is not None:

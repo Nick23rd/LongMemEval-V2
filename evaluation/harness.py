@@ -28,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 from memory_modules.memory import (  # noqa: E402
     Memory,
     MemoryContextItem,
+    StatefulMemory,
     build_memory,
     load_memory,
     load_memory_config,
@@ -40,6 +41,7 @@ from evaluation.qa_eval_metrics import (  # noqa: E402
     is_unknown,
     score_to_bool,
 )
+from evaluation.memory_lifecycle import build_stateful_memory  # noqa: E402
 
 
 CATEGORY_MAP = {
@@ -123,7 +125,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--domain", choices=["web", "enterprise"], required=True)
     parser.add_argument("--questions-path", required=True, help="Path to JSON file containing evaluation questions")
     parser.add_argument("--haystack-path", required=True, help="Path to JSON file mapping question id to list of trajectory ids in its haystack")
-    parser.add_argument("--trajectories-path", required=True, help="Path to JSON file containing trajectory data")
+    parser.add_argument("--trajectories-path", default=None, help="Path to trajectory data; required when building memory")
     parser.add_argument(
         "--memory-config-path",
         default=None,
@@ -261,7 +263,7 @@ def inject_runtime_memory_params(
     memory_config: dict[str, Any],
     *,
     workspace_dir: Path,
-    trajectories_path: str,
+    trajectories_path: str | None,
     reader_temperature: float | None = None,
     reader_top_p: float | None = None,
     query_trace_dir: Path | None = None,
@@ -274,17 +276,18 @@ def inject_runtime_memory_params(
         "rag",
         "agentrunbook_r",
         "codex",
-        "free_code_auto_memory",
+        "codeagent_auto_memory",
         "agentrunbook_c",
         "agentrunbook_c_v2",
     }:
         return runtime_config
 
     runtime_config["memory_params"]["workspace_dir"] = str(workspace_dir.resolve())
-    runtime_config["memory_params"]["trajectories_root_dir"] = str(
-        Path(trajectories_path).resolve().parent
-    )
-    if runtime_config["memory_type"] in {"codex", "free_code_auto_memory", "agentrunbook_c", "agentrunbook_c_v2"} and query_trace_dir is not None:
+    if trajectories_path is not None:
+        runtime_config["memory_params"]["trajectories_root_dir"] = str(
+            Path(trajectories_path).resolve().parent
+        )
+    if runtime_config["memory_type"] in {"codex", "codeagent_auto_memory", "agentrunbook_c", "agentrunbook_c_v2"} and query_trace_dir is not None:
         runtime_config["memory_params"]["query_trace_dir"] = str(query_trace_dir.resolve())
     if runtime_config["memory_type"] == "agent_runbook":
         generation_params_obj = runtime_config["memory_params"].get("generation_params", {})
@@ -346,6 +349,16 @@ def memory_config_enables_online_learning(memory_config: dict[str, Any] | None) 
         isinstance(online_learning_params, dict)
         and online_learning_params.get("enabled") is True
     )
+
+
+def memory_config_resumes_stateful_build(memory_config: dict[str, Any] | None) -> bool:
+    if memory_config is None or memory_config.get("memory_type") != "codeagent_auto_memory":
+        return False
+    memory_params = memory_config.get("memory_params")
+    if not isinstance(memory_params, dict):
+        return False
+    params = memory_params.get("codeagent_auto_memory_params")
+    return isinstance(params, dict) and params.get("resume_build") is True
 
 
 def get_memory_context_processor() -> Any:
@@ -1096,12 +1109,13 @@ def main() -> None:
             "rag",
             "agentrunbook_r",
             "codex",
-            "free_code_auto_memory",
+            "codeagent_auto_memory",
             "agentrunbook_c",
             "agentrunbook_c_v2",
         }:
             require(
-                not memory_workspace_root.exists(),
+                not memory_workspace_root.exists()
+                or memory_config_resumes_stateful_build(memory_config_template),
                 f"Refusing to overwrite existing memory workspace: {memory_workspace_root}",
             )
     if args.save_memory:
@@ -1184,7 +1198,7 @@ def main() -> None:
         if args.load_memory_dir is not None:
             print("All questions share the same haystack, loading shared memory once for all questions.")
             requested_config = memory_config_template
-            if requested_config is not None and requested_config["memory_type"] == "free_code_auto_memory":
+            if requested_config is not None and requested_config["memory_type"] == "codeagent_auto_memory":
                 requested_config = inject_runtime_memory_params(
                     requested_config,
                     workspace_dir=memory_workspace_root / "shared",
@@ -1201,6 +1215,7 @@ def main() -> None:
         else:
             print("All questions share the same haystack, building shared memory once for all questions.")
             require(memory_config is not None, "Missing memory config for shared memory construction")
+            require(args.trajectories_path is not None, "--trajectories-path is required when building memory")
             trajectories = load_trajectories(args.trajectories_path)
             shared_memory = build_memory(
                 inject_runtime_memory_params(
@@ -1218,9 +1233,17 @@ def main() -> None:
                 generation_top_p=args.top_p,
                 cancel_event=prompt_build_cancel_event,
             )
-            for traj_id in tqdm(shared_haystack_ids, desc="Building memory", unit="traj"):
-                require(traj_id in trajectories, f"Missing trajectory id in trajectories data: {traj_id}")
-                shared_memory.insert(trajectories[traj_id])
+            if isinstance(shared_memory, StatefulMemory):
+                build_stateful_memory(
+                    shared_memory,
+                    shared_haystack_ids,
+                    trajectories,
+                    progress=lambda ids: tqdm(ids, desc="Building memory", unit="traj"),
+                )
+            else:
+                for traj_id in tqdm(shared_haystack_ids, desc="Building memory", unit="traj"):
+                    require(traj_id in trajectories, f"Missing trajectory id in trajectories data: {traj_id}")
+                    shared_memory.insert(trajectories[traj_id])
             if args.save_memory:
                 save_memory(shared_memory, memory_state_dir)
         if args.skip_evaluation:
@@ -1239,6 +1262,7 @@ def main() -> None:
         require(not args.skip_evaluation, "--skip-evaluation is only supported when all questions share the same ordered haystack")
         require(args.load_memory_dir is None, "--load-memory-dir is only supported when all questions share the same ordered haystack")
         print("Questions have different haystacks, building memory separately for each question.")
+        require(args.trajectories_path is not None, "--trajectories-path is required when building memory")
         trajectories = load_trajectories(args.trajectories_path)
         require(memory_config is not None, "Missing memory config for per-question memory construction")
 
@@ -1531,6 +1555,8 @@ def main() -> None:
     }
     aggregated["completed_at_utc"] = utc_now_iso()
     aggregated["shared_haystack"] = shared_haystack
+    if isinstance(shared_memory, StatefulMemory):
+        aggregated["memory_build"] = shared_memory.build_metrics()
     if shared_haystack_ids is not None:
         aggregated["shared_haystack_ids"] = shared_haystack_ids
     save_json(output_dir / "aggregated_metrics.json", aggregated)

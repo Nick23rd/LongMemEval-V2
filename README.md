@@ -77,7 +77,7 @@ The repository implements the following memory modules:
 - `codex`: vanilla Codex coding-agent memory baseline.
 - `claude_code`: Claude Code coding-agent memory baseline.
 - `codeagent`: CodeAgent coding-agent memory baseline.
-- `free_code_auto_memory`: CodeAgent native auto-memory formation and isolated recall baseline.
+- `codeagent_auto_memory`: CodeAgent native auto-memory formation and isolated recall baseline.
 - `agentrunbook_c`: AgentRunbook-C.
 
 ## Setup: Environment
@@ -185,18 +185,18 @@ $env:CODEAGENT_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.
 The auto-memory experiment uses a separate configuration namespace and a
 two-stage build/evaluate workflow:
 
-See [the Chinese manual testing guide](docs/free_code_auto_memory_manual_test.zh-CN.md)
+See [the Chinese manual testing guide](docs/codeagent_auto_memory_manual_test.zh-CN.md)
 for preflight checks, smoke tests, artifact inspection, and troubleshooting.
 
 ```powershell
-$env:FREE_CODE_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
+$env:CODEAGENT_AUTO_MEMORY_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
 $env:DATA_ROOT = 'D:\path\to\longmemeval-v2'
 $env:PHASE = 'build'
-bash evaluation/scripts/run_free_code_auto_memory.sh
+bash evaluation/scripts/run_codeagent_auto_memory.sh
 
 $env:PHASE = 'evaluate'
-$env:MEMORY_STATE = 'runs/free_code_auto_memory_build/memory_state'
-bash evaluation/scripts/run_free_code_auto_memory.sh
+$env:MEMORY_STATE = 'runs/codeagent_auto_memory_build/memory_state'
+bash evaluation/scripts/run_codeagent_auto_memory.sh
 ```
 
 Use a separate versioned binary and output root for each comparison. Set
@@ -229,13 +229,14 @@ evaluation/scripts/run_agentrunbook_r.sh
 evaluation/scripts/run_codex.sh
 evaluation/scripts/run_claude_code.sh
 evaluation/scripts/run_codeagent.sh
-evaluation/scripts/run_free_code_auto_memory.sh
+evaluation/scripts/run_codeagent_auto_memory.sh
 evaluation/scripts/run_agentrunbook_c.sh
 ```
 
-Each script runs both the web and enterprise domains for the selected tier, writing
-outputs such as `runs/no_retrieval_web_small` and
-`runs/no_retrieval_enterprise_small`. Set `TIER=medium` to run LME-V2-Medium.
+Most baseline scripts run both domains for the selected tier. The
+`run_codeagent_auto_memory.sh` wrapper runs the single domain selected by `DOMAIN`
+because its build and evaluation phases use a domain-specific saved memory state.
+Set `TIER=medium` to run LME-V2-Medium.
 
 Each run writes `aggregated_metrics.json`. To combine matching enterprise and web runs for the same method and tier:
 

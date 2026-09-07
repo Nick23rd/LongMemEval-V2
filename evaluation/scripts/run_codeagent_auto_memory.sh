@@ -7,13 +7,13 @@ DATA_ROOT_VALUE="${DATA_ROOT:?Set DATA_ROOT to the LongMemEval-V2 dataset direct
 DOMAIN_VALUE="${DOMAIN:-web}"
 TIER_VALUE="${TIER:-small}"
 PHASE_VALUE="${PHASE:-build}"
-OUTPUT_DIR_VALUE="${OUTPUT_DIR:-runs/free_code_auto_memory_${PHASE_VALUE}}"
+OUTPUT_DIR_VALUE="${OUTPUT_DIR:-runs/codeagent_auto_memory_${PHASE_VALUE}}"
 
 COMMON_ARGS=(
   --data-root "$DATA_ROOT_VALUE"
   --domain "$DOMAIN_VALUE"
   --tier "$TIER_VALUE"
-  --method free_code_auto_memory
+  --method codeagent_auto_memory
   --output-dir "$OUTPUT_DIR_VALUE"
 )
 
