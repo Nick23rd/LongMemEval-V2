@@ -76,6 +76,7 @@ The repository implements the following memory modules:
 - `agentrunbook_r`: AgentRunbook-R.
 - `codex`: vanilla Codex coding-agent memory baseline.
 - `claude_code`: Claude Code coding-agent memory baseline.
+- `codeagent`: CodeAgent coding-agent memory baseline.
 - `agentrunbook_c`: AgentRunbook-C.
 
 ## Setup: Environment
@@ -165,6 +166,21 @@ export CLAUDE_MODEL=sonnet
 export CLAUDE_VERSION_LABEL=2.1.0
 ```
 
+For CodeAgent, only the executable path is normally needed; its built-in model
+is used unless `CODEAGENT_MODEL` is explicitly set. A local Windows build from
+the CodeAgent repository can be selected directly:
+
+```bash
+export CODEAGENT_BINARY=/path/to/codeagentcli
+# Optional future overrides:
+# export CODEAGENT_MODEL=...
+# export CODEAGENT_VERSION_LABEL=...
+```
+
+```powershell
+$env:CODEAGENT_BINARY = 'D:\workspace\CodeAgent\packages\codeagent\codeagentcli.exe'
+```
+
 Use a separate versioned binary and output root for each comparison. Set
 `CLAUDE_BARE=true` when every tested Claude Code version supports `--bare` to
 disable CLAUDE.md, plugins, MCP servers, skills, hooks, and auto memory. Session
@@ -194,6 +210,7 @@ evaluation/scripts/run_rag_query_to_slice_notes.sh
 evaluation/scripts/run_agentrunbook_r.sh
 evaluation/scripts/run_codex.sh
 evaluation/scripts/run_claude_code.sh
+evaluation/scripts/run_codeagent.sh
 evaluation/scripts/run_agentrunbook_c.sh
 ```
 

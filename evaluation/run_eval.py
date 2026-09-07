@@ -25,6 +25,7 @@ METHODS = {
     "agentrunbook_r",
     "codex",
     "claude_code",
+    "codeagent",
     "agentrunbook_c",
     "agentrunbook_c_v2",
 }
@@ -115,6 +116,23 @@ def parse_args() -> argparse.Namespace:
         "--claude-no-session-persistence",
         action=argparse.BooleanOptionalAction,
         default=env_bool("CLAUDE_NO_SESSION_PERSISTENCE", True),
+    )
+    parser.add_argument("--codeagent-binary", default=os.getenv("CODEAGENT_BINARY", "codeagentcli"))
+    parser.add_argument("--codeagent-model", default=os.getenv("CODEAGENT_MODEL"))
+    parser.add_argument("--codeagent-effort", default=os.getenv("CODEAGENT_EFFORT"))
+    parser.add_argument("--codeagent-timeout-seconds", type=float, default=float(os.getenv("CODEAGENT_TIMEOUT_SECONDS", "1800")))
+    parser.add_argument("--codeagent-max-retries", type=int, default=int(os.getenv("CODEAGENT_MAX_RETRIES", "3")))
+    parser.add_argument("--codeagent-max-turns", type=int, default=int(os.getenv("CODEAGENT_MAX_TURNS", "30")))
+    parser.add_argument("--codeagent-version-label", default=os.getenv("CODEAGENT_VERSION_LABEL"))
+    parser.add_argument(
+        "--codeagent-bare",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("CODEAGENT_BARE", False),
+    )
+    parser.add_argument(
+        "--codeagent-no-session-persistence",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("CODEAGENT_NO_SESSION_PERSISTENCE", True),
     )
     parser.add_argument("--openai-sdk-model", default=os.getenv("OPENAI_SDK_MODEL", "gpt-5.4-mini"))
     parser.add_argument(
@@ -278,6 +296,26 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                     "bare": args.claude_bare,
                     "no_session_persistence": args.claude_no_session_persistence,
                     "version_label": args.claude_version_label,
+                    "extra_args": [],
+                },
+            },
+        }
+    if args.method == "codeagent":
+        return {
+            "memory_type": "codeagent",
+            "memory_params": {
+                "evidence_mode": "both",
+                "trajectory_pool_root": None,
+                "codeagent_params": {
+                    "binary": args.codeagent_binary,
+                    "model": args.codeagent_model,
+                    "effort": args.codeagent_effort,
+                    "timeout_seconds": args.codeagent_timeout_seconds,
+                    "max_retries": args.codeagent_max_retries,
+                    "max_turns": args.codeagent_max_turns,
+                    "bare": args.codeagent_bare,
+                    "no_session_persistence": args.codeagent_no_session_persistence,
+                    "version_label": args.codeagent_version_label,
                     "extra_args": [],
                 },
             },

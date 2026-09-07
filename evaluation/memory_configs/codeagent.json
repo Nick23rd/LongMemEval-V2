@@ -1,0 +1,19 @@
+{
+  "memory_type": "codeagent",
+  "memory_params": {
+    "evidence_mode": "both",
+    "trajectory_pool_root": null,
+    "codeagent_params": {
+      "binary": "codeagentcli",
+      "model": null,
+      "effort": null,
+      "timeout_seconds": 1800.0,
+      "max_retries": 3,
+      "max_turns": 30,
+      "bare": false,
+      "no_session_persistence": true,
+      "version_label": null,
+      "extra_args": []
+    }
+  }
+}
