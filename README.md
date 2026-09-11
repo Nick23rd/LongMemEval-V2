@@ -101,6 +101,13 @@ Researchers using a different CUDA or CPU setup should install the appropriate
 PyTorch build first, either with a direct `pip install` command or by editing
 `requirements-torch.txt` before creating the environment.
 
+For local development, install the test extra and run the test suite:
+
+```bash
+pip install -e ".[test]"
+python -m pytest
+```
+
 The environment does not include vLLM. Start or forward your own
 OpenAI-compatible model servers, then point the scripts to them. The paper runs
 use Qwen3.5-9B as the fixed reader and Qwen3-Embedding-8B for embedding-based

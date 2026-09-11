@@ -18,13 +18,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+  "pytest>=8,<10",
+]
 torch = [
   "torch",
   "torchvision",
 ]
 
-[tool.setuptools]
-packages = ["data", "evaluation", "memory_modules"]
+[tool.setuptools.packages.find]
+include = ["data", "evaluation", "memory_modules", "memory_modules.*"]
 
 [tool.setuptools.package-data]
-memory_modules = ["assets/agentrunbook_c/INSTRUCTION.md", "assets/agentrunbook_c/scripts/*.py"]
+memory_modules = [
+  "assets/agentrunbook_c/INSTRUCTION.md",
+  "assets/agentrunbook_c/scripts/*.py",
+  "assets/agentrunbook_online_learning/*.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
