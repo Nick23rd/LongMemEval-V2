@@ -191,6 +191,9 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         assert answer["usage"] == {"input_tokens": 2, "output_tokens": 1}
         assert answer["metadata"]["query_invocation_id"] == "question/direct"
         assert answer["metadata"]["main_memory_unchanged"] is True
+        assert answer["metadata"]["detected_query_version"] == "1.2.3 (codeAgentCLI)"
+        assert answer["metadata"]["query_launcher_command"] == ["fake-codeagent"]
+        assert len(answer["metadata"]["direct_answer_prompt_hash"]) == 64
         assert "directly" in calls[-1]["command"][-1]
         assert (workspace / "auto_memory" / "MEMORY.md").read_bytes() == main_before
         assert not (workspace / "auto_memory" / "query-only.md").exists()

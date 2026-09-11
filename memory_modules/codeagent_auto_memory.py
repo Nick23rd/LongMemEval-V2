@@ -607,6 +607,10 @@ class CodeAgentAutoMemory(StatefulMemory):
                 "query_invocation_id": summary["query_invocation_id"],
                 "attempt": summary["attempt"],
                 "main_memory_unchanged": summary["main_memory_unchanged"],
+                "detected_query_version": self.detected_query_version,
+                "query_launcher_command": list(self.query_launcher_command),
+                "query_prompt_hash": self._prompt_manifest()["query"]["sha256"],
+                "direct_answer_prompt_hash": self._prompt_manifest()["direct_answer"]["sha256"],
             },
         }
 

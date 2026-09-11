@@ -80,6 +80,28 @@ The repository implements the following memory modules:
 - `codeagent_auto_memory`: CodeAgent native auto-memory formation and isolated recall baseline.
 - `agentrunbook_c`: AgentRunbook-C.
 
+### CodeAgent internal-memory regression evaluation
+
+This fork also supports end-to-end `memory_off` / `baseline` / `candidate`
+evaluation and a 2×2 write-versus-recall attribution design for CodeAgent's
+native auto-memory. A fixed 10-question calibration run produces JSON, JSONL,
+Markdown, and standalone HTML reports:
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_attribution_calibration.ps1 `
+  -DataRoot .\data\longmemeval-v2 `
+  -OutputRoot .\runs\attribution_calibration_001 `
+  -ConfirmFullHaystack `
+  -WriterALauncherCommand D:\builds\before\codeagentcli.exe `
+  -RecallALauncherCommand D:\builds\before\codeagentcli.exe `
+  -WriterBLauncherCommand D:\builds\after\codeagentcli.exe `
+  -RecallBLauncherCommand D:\builds\after\codeagentcli.exe
+```
+
+See the [evaluation-environment runbook](docs/codeagent_memory_evaluation_environment_runbook.zh-CN.md)
+for source launchers, prompt-only experiments, recovery with `-Resume`, report
+interpretation, and the calibration acceptance criteria.
+
 ## Setup: Environment
 
 LongMemEval-V2 uses Python 3.11. The default conda environment installs

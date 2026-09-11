@@ -74,7 +74,13 @@ def load_cell_metrics(value: str | Path) -> dict[str, Any]:
     query = metrics.get("memory_query") or {}
     summaries = [read_json(path) for path in run_dir.glob("memory_workspace/shared/answer_sessions/*/attempt_*/summary.json")]
     usage = [item.get("usage") or {} for item in summaries]
+    result_rows = load_results(run_dir)
+    direct_metadata = next(iter(result_rows.values())).get("direct_answer_metadata") or {}
     return {
+        "detected_query_version": direct_metadata.get("detected_query_version"),
+        "query_launcher_command": direct_metadata.get("query_launcher_command"),
+        "query_prompt_hash": direct_metadata.get("query_prompt_hash"),
+        "direct_answer_prompt_hash": direct_metadata.get("direct_answer_prompt_hash"),
         "prompt_tokens": tokens.get("prompt_tokens", 0),
         "completion_tokens": tokens.get("completion_tokens", 0),
         "total_tokens": tokens.get("total_tokens", 0),
@@ -184,13 +190,15 @@ def render_html(summary: dict[str, Any], diffs: list[dict[str, Any]]) -> str:
         usage = writer.get("usage") or {}
         writer_rows += (
             f"<tr><td><b>{name.upper()}</b></td><td>{escaped(writer.get('version_label') or writer.get('detected_version'))}</td>"
-            f"<td><code>{escaped(' '.join(writer.get('launcher_command') or []))}</code></td>"
+            f"<td><code>{escaped(' '.join(writer.get('launcher_command') or []))}</code></td><td><code title=\"{escaped(writer.get('prompt_hash'))}\">{escaped((writer.get('prompt_hash') or '')[:12])}</code></td>"
             f"<td>{writer.get('trajectory_count') or 0}</td><td>{writer.get('failed_attempt_count') or 0}</td>"
             f"<td>{int(usage.get('input_tokens', 0) or 0):,} / {int(usage.get('output_tokens', 0) or 0):,}</td>"
             f"<td>${float(usage.get('total_cost_usd', 0) or 0):.4f}</td><td>{float(writer.get('duration_seconds', 0) or 0):.1f}s</td></tr>"
         )
     cell_metric_rows = "".join(
-        f"<tr><td><b>{name.upper()}</b></td><td>{cell.get('total_tokens', 0):,}</td><td>${cell.get('total_cost_usd', 0):.4f}</td>"
+        f"<tr><td><b>{name.upper()}</b></td><td>{escaped(cell.get('detected_query_version'))}</td><td><code>{escaped(' '.join(cell.get('query_launcher_command') or []))}</code></td>"
+        f"<td><code title=\"{escaped(cell.get('direct_answer_prompt_hash'))}\">{escaped((cell.get('direct_answer_prompt_hash') or '')[:12])}</code></td>"
+        f"<td>{cell.get('total_tokens', 0):,}</td><td>${cell.get('total_cost_usd', 0):.4f}</td>"
         f"<td>{float(cell.get('query_duration_seconds', 0) or 0):.1f}s</td><td>{cell.get('failed_attempt_count', 0)}</td></tr>"
         for name, cell in summary.get("cells", {}).items()
     )
@@ -224,8 +232,8 @@ details{{background:var(--panel);border:1px solid var(--line);border-radius:12px
 </style></head><body><main><header><div><h1>CodeAgent 记忆归因报告</h1><p class="muted">写入策略 × 召回算法 · 2×2 配对实验</p></div><div class="count">{summary['question_count']} 道题</div></header>
 <div class="matrix">{cell_cards}</div><h2>归因结果</h2><div class="panel"><table>{effect_rows}</table></div>
 <p class="note"><b>解读：</b>正值表示 B 优于 A，负值表示退化。交互效应不为零时，说明写入与召回的组合存在耦合。该诊断不替代端到端 baseline/candidate 回归结论。</p>
-<h2>写入构建与版本</h2><div class="panel"><table><thead><tr><th>写入</th><th>版本</th><th>Launcher</th><th>轨迹</th><th>失败尝试</th><th>输入/输出 Token</th><th>费用</th><th>耗时</th></tr></thead><tbody>{writer_rows}</tbody></table></div>
-<h2>召回资源消耗</h2><div class="panel"><table><thead><tr><th>单元</th><th>Token</th><th>费用</th><th>耗时</th><th>失败尝试</th></tr></thead><tbody>{cell_metric_rows}</tbody></table></div>
+<h2>写入构建与版本</h2><div class="panel"><table><thead><tr><th>写入</th><th>版本</th><th>Launcher</th><th>写入提示词 SHA</th><th>轨迹</th><th>失败尝试</th><th>输入/输出 Token</th><th>费用</th><th>耗时</th></tr></thead><tbody>{writer_rows}</tbody></table></div>
+<h2>召回资源消耗</h2><div class="panel"><table><thead><tr><th>单元</th><th>版本</th><th>Launcher</th><th>回答提示词 SHA</th><th>Token</th><th>费用</th><th>耗时</th><th>失败尝试</th></tr></thead><tbody>{cell_metric_rows}</tbody></table></div>
 <h2>逐题结果</h2>{''.join(question_cards)}</main></body></html>"""
 
 
