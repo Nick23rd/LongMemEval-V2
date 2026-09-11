@@ -174,6 +174,21 @@ class CodeAgentAutoMemory(StatefulMemory):
                 "codeagent auto-memory launcher_command must be a non-empty list of non-empty strings",
             )
             self.launcher_command = [str(item) for item in launcher_obj]
+        self.ingest_launcher_command = self._resolve_launcher(
+            params.get("ingest_launcher_command"),
+            "ingest_launcher_command",
+            self.launcher_command,
+        )
+        self.query_launcher_command = self._resolve_launcher(
+            params.get("query_launcher_command"),
+            "query_launcher_command",
+            self.launcher_command,
+        )
+        self.allow_query_override_on_load = params.get("allow_query_override_on_load", False)
+        require(
+            isinstance(self.allow_query_override_on_load, bool),
+            "allow_query_override_on_load must be boolean",
+        )
         model = params.get("model")
         require(model is None or (isinstance(model, str) and model.strip()), "codeagent auto-memory model must be null or a non-empty string")
         self.model = model.strip() if isinstance(model, str) else None
@@ -234,10 +249,32 @@ class CodeAgentAutoMemory(StatefulMemory):
             "timestamp_fields_checked": [],
             "timestamp_field_used": None,
         }
-        self.detected_version = self._detect_version()
+        self.detected_ingest_version = self._detect_version(self.ingest_launcher_command)
+        self.detected_query_version = (
+            self.detected_ingest_version
+            if self.query_launcher_command == self.ingest_launcher_command
+            else self._detect_version(self.query_launcher_command)
+        )
+        self.detected_version = self.detected_ingest_version
         if self.workspace_dir is not None:
             self._ensure_layout()
             self._restore_checkpoint()
+
+    @staticmethod
+    def _resolve_launcher(
+        value: object,
+        key: str,
+        default: list[str],
+    ) -> list[str]:
+        if value is None:
+            return list(default)
+        require(
+            isinstance(value, list)
+            and value
+            and all(isinstance(item, str) and item.strip() for item in value),
+            f"codeagent auto-memory {key} must be a non-empty list of non-empty strings",
+        )
+        return [str(item) for item in value]
 
     @staticmethod
     def _resolve_prompt(params: dict[str, object], key: str, default: str) -> str:
@@ -258,10 +295,10 @@ class CodeAgentAutoMemory(StatefulMemory):
             },
         }
 
-    def _detect_version(self) -> str | None:
+    def _detect_version(self, launcher_command: list[str]) -> str | None:
         try:
             result = subprocess.run(
-                [*self.launcher_command, "--version"],
+                [*launcher_command, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -276,6 +313,9 @@ class CodeAgentAutoMemory(StatefulMemory):
         params: dict[str, object] = {
             "binary": str(self.binary),
             "launcher_command": list(self.launcher_command),
+            "ingest_launcher_command": list(self.ingest_launcher_command),
+            "query_launcher_command": list(self.query_launcher_command),
+            "allow_query_override_on_load": self.allow_query_override_on_load,
             "model": self.model,
             "timeout_seconds": self.timeout_seconds,
             "ingest_max_turns": self.ingest_max_turns,
@@ -316,6 +356,21 @@ class CodeAgentAutoMemory(StatefulMemory):
                 "launcher_command",
                 [str(params.get("binary", DEFAULT_BINARY))],
             )
+            params.setdefault("ingest_launcher_command", list(params["launcher_command"]))
+            params.setdefault("query_launcher_command", list(params["launcher_command"]))
+        allow_query_override = requested_params.pop("allow_query_override_on_load", False)
+        saved_params.pop("allow_query_override_on_load", None)
+        require(isinstance(allow_query_override, bool), "allow_query_override_on_load must be boolean")
+        if allow_query_override:
+            for key in (
+                "query_launcher_command",
+                "query_prompt",
+                "direct_answer_prompt",
+                "query_max_turns",
+                "query_max_attempts",
+            ):
+                if key in requested_params:
+                    saved_params[key] = requested_params[key]
         for key, default in (
             ("experiment_mode", DEFAULT_EXPERIMENT_MODE),
             ("version_label", None),
@@ -358,7 +413,10 @@ class CodeAgentAutoMemory(StatefulMemory):
         self.ingestion_plan = dict(metadata)
 
     def _command(self, prompt: str, max_turns: int, *, ingestion: bool) -> list[str]:
-        command = [*self.launcher_command, "-p", "--output-format", "json", "--no-session-persistence", "--max-turns", str(max_turns)]
+        launcher_command = (
+            self.ingest_launcher_command if ingestion else self.query_launcher_command
+        )
+        command = [*launcher_command, "-p", "--output-format", "json", "--no-session-persistence", "--max-turns", str(max_turns)]
         if ingestion:
             command.extend(["--permission-mode", "acceptEdits", "--tools=Read,Write,Edit,Glob,Grep"])
         else:
@@ -484,7 +542,7 @@ class CodeAgentAutoMemory(StatefulMemory):
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
-        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_ingest_version, "detected_ingest_version": self.detected_ingest_version, "detected_query_version": self.detected_query_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "ingest_launcher_command": list(self.ingest_launcher_command), "query_launcher_command": list(self.query_launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
         _write_json(self.workspace_dir / "prompt_manifest.json", self._prompt_manifest())
         usage_totals: dict[str, float] = {}
         for record in self.ingestion_records:
@@ -615,12 +673,12 @@ class CodeAgentAutoMemory(StatefulMemory):
             manifest.get("experiment_mode", DEFAULT_EXPERIMENT_MODE) == self.experiment_mode,
             "Saved auto-memory experiment mode does not match requested mode",
         )
-        saved_version = manifest.get("detected_version")
+        saved_version = manifest.get("detected_ingest_version", manifest.get("detected_version"))
         require(
             saved_version is None
-            or self.detected_version is None
-            or saved_version == self.detected_version,
-            f"Saved CodeAgent version {saved_version!r} does not match runtime {self.detected_version!r}",
+            or self.detected_ingest_version is None
+            or saved_version == self.detected_ingest_version,
+            f"Saved ingest CodeAgent version {saved_version!r} does not match runtime {self.detected_ingest_version!r}",
         )
         require(manifest.get("build_status") in {"complete", "complete_with_empty_ingestions", "complete_memory_off"}, f"Saved auto-memory build is not complete: {manifest.get('build_status')}")
         self.inserted_trajectory_ids = list(manifest.get("trajectory_ids", []))

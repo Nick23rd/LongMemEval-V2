@@ -1,5 +1,6 @@
 import json
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,6 +87,28 @@ def test_source_launcher_command_is_used_for_version_and_sessions(tmp_path: Path
         "bun",
         "D:/CodeAgent/src/cli.ts",
     ]
+
+
+def test_query_launcher_override_requires_explicit_attribution_mode(tmp_path: Path) -> None:
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess([], 0, "version-a\n", "")
+        memory = CodeAgentAutoMemory(_config(tmp_path / "workspace", tmp_path))
+    saved = memory.memory_config
+    requested = deepcopy(saved)
+    params = requested["memory_params"]["codeagent_auto_memory_params"]
+    assert isinstance(params, dict)
+    params["query_launcher_command"] = ["candidate-codeagent"]
+    params["allow_query_override_on_load"] = False
+
+    with pytest.raises(RuntimeError, match="does not match saved ingestion config"):
+        CodeAgentAutoMemory.reconcile_loaded_memory_config(saved, requested)
+
+    params["allow_query_override_on_load"] = True
+    effective = CodeAgentAutoMemory.reconcile_loaded_memory_config(saved, requested)
+    effective_params = effective["memory_params"]["codeagent_auto_memory_params"]
+    assert isinstance(effective_params, dict)
+    assert effective_params["ingest_launcher_command"] == ["fake-codeagent"]
+    assert effective_params["query_launcher_command"] == ["candidate-codeagent"]
 
 
 def test_invalid_experiment_mode_is_rejected(tmp_path: Path) -> None:

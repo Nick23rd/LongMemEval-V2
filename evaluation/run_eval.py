@@ -147,6 +147,9 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("CODEAGENT_AUTO_MEMORY_LAUNCHER_COMMAND_JSON"),
         help='JSON argv used to launch CodeAgent, e.g. ["bun","D:/CodeAgent/src/cli.ts"]; overrides binary',
     )
+    parser.add_argument("--codeagent-auto-memory-ingest-launcher-command-json", default=os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_LAUNCHER_COMMAND_JSON"))
+    parser.add_argument("--codeagent-auto-memory-query-launcher-command-json", default=os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_LAUNCHER_COMMAND_JSON"))
+    parser.add_argument("--codeagent-auto-memory-allow-query-override-on-load", action=argparse.BooleanOptionalAction, default=env_bool("CODEAGENT_AUTO_MEMORY_ALLOW_QUERY_OVERRIDE_ON_LOAD", False))
     parser.add_argument("--codeagent-auto-memory-model", default=os.getenv("CODEAGENT_AUTO_MEMORY_MODEL"))
     parser.add_argument("--codeagent-auto-memory-timeout-seconds", type=float, default=float(os.getenv("CODEAGENT_AUTO_MEMORY_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--codeagent-auto-memory-ingest-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_TURNS", "30")))
@@ -354,18 +357,24 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
             },
         }
     if args.method == "codeagent_auto_memory":
-        launcher_command = None
-        if args.codeagent_auto_memory_launcher_command_json is not None:
+        def parse_launcher(raw: str | None, label: str) -> list[str] | None:
+            if raw is None:
+                return None
             try:
-                launcher_command = json.loads(args.codeagent_auto_memory_launcher_command_json)
+                value = json.loads(raw)
             except json.JSONDecodeError as exc:
-                raise RuntimeError("Invalid CodeAgent launcher command JSON") from exc
+                raise RuntimeError(f"Invalid CodeAgent {label} launcher command JSON") from exc
             if not (
-                isinstance(launcher_command, list)
-                and launcher_command
-                and all(isinstance(item, str) and item.strip() for item in launcher_command)
+                isinstance(value, list)
+                and value
+                and all(isinstance(item, str) and item.strip() for item in value)
             ):
-                raise RuntimeError("CodeAgent launcher command JSON must be a non-empty string array")
+                raise RuntimeError(f"CodeAgent {label} launcher command JSON must be a non-empty string array")
+            return value
+
+        launcher_command = parse_launcher(args.codeagent_auto_memory_launcher_command_json, "base")
+        ingest_launcher_command = parse_launcher(args.codeagent_auto_memory_ingest_launcher_command_json, "ingest")
+        query_launcher_command = parse_launcher(args.codeagent_auto_memory_query_launcher_command_json, "query")
 
         def optional_prompt(path_value: str | None, label: str) -> str | None:
             if path_value is None:
@@ -390,6 +399,9 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                 "codeagent_auto_memory_params": {
                     "binary": args.codeagent_auto_memory_binary,
                     **({"launcher_command": launcher_command} if launcher_command is not None else {}),
+                    **({"ingest_launcher_command": ingest_launcher_command} if ingest_launcher_command is not None else {}),
+                    **({"query_launcher_command": query_launcher_command} if query_launcher_command is not None else {}),
+                    "allow_query_override_on_load": args.codeagent_auto_memory_allow_query_override_on_load,
                     "model": args.codeagent_auto_memory_model,
                     "timeout_seconds": args.codeagent_auto_memory_timeout_seconds,
                     "ingest_max_turns": args.codeagent_auto_memory_ingest_max_turns,
