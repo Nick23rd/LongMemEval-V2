@@ -113,6 +113,33 @@ memory_off 构建与直接回答
 
 默认选择真实题目 `05cce9b3`。baseline 和 candidate 默认使用同一 binary，仅用于验证流程；正式回归必须通过 `-BaselineBinary`、`-CandidateBinary`、版本标签或提示词文件传入真正的修改前后版本。
 
+对比两个打包后的 CLI：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_regression.ps1 `
+  -DataRoot $env:DATA_ROOT `
+  -OutputRoot '.\runs\packed_cli_comparison_01' `
+  -BaselineBinary 'D:\builds\before\codeagentcli.exe' `
+  -CandidateBinary 'D:\builds\after\codeagentcli.exe' `
+  -BaselineVersionLabel 'before-change' `
+  -CandidateVersionLabel 'after-change'
+```
+
+直接从两个源码仓启动时，传入完整 argv 数组。源码入口必须使用绝对路径：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_regression.ps1 `
+  -DataRoot $env:DATA_ROOT `
+  -OutputRoot '.\runs\source_comparison_01' `
+  -MemoryOffLauncherCommand @('bun', 'D:\CodeAgent-before\src\cli.ts') `
+  -BaselineLauncherCommand @('bun', 'D:\CodeAgent-before\src\cli.ts') `
+  -CandidateLauncherCommand @('bun', 'D:\CodeAgent-after\src\cli.ts') `
+  -BaselineVersionLabel 'before-commit-abc123' `
+  -CandidateVersionLabel 'after-commit-def456'
+```
+
+源码启动不会把源码仓作为 Agent 工作目录。评测器仍在逐次创建的临时 session 目录中运行进程，只把绝对入口路径作为启动参数。
+
 产物位于：
 
 ```text

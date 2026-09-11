@@ -3,6 +3,7 @@
   "memory_params": {
     "codeagent_auto_memory_params": {
       "binary": "codeagentcli",
+      "launcher_command": ["codeagentcli"],
       "model": null,
       "timeout_seconds": 1800.0,
       "ingest_max_turns": 30,

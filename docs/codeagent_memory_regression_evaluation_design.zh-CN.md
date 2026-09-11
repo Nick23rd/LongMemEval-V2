@@ -146,6 +146,27 @@ session_persistence == disabled
 }
 ```
 
+实际被测版本可能来自两种交付形式：
+
+```text
+打包产物：D:/builds/baseline/codeagentcli.exe
+源码启动：bun D:/CodeAgent-baseline/src/cli.ts
+```
+
+因此实现使用 argv 数组形式的 `launcher_command` 作为统一启动契约：
+
+```json
+{"launcher_command": ["D:/builds/baseline/codeagentcli.exe"]}
+```
+
+或：
+
+```json
+{"launcher_command": ["bun", "D:/CodeAgent-baseline/src/cli.ts"]}
+```
+
+源码路径应使用绝对路径。无论采用哪种启动方式，CodeAgent 进程的 `cwd` 都是临时隔离会话目录，而不是源码仓目录；这样不会把源码仓文件意外暴露成问题上下文。完整 launcher argv 和 `--version` 输出都需要写入评测产物。
+
 ```json
 {
   "name": "candidate",

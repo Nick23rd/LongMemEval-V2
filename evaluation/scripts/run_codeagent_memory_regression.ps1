@@ -13,6 +13,9 @@ param(
     [string]$MemoryOffBinary = "codeagentcli",
     [string]$BaselineBinary = "codeagentcli",
     [string]$CandidateBinary = "codeagentcli",
+    [string[]]$MemoryOffLauncherCommand = @(),
+    [string[]]$BaselineLauncherCommand = @(),
+    [string[]]$CandidateLauncherCommand = @(),
     [string]$BaselineVersionLabel = "baseline",
     [string]$CandidateVersionLabel = "candidate",
     [string]$BaselineIngestPromptFile = "",
@@ -38,6 +41,7 @@ function Invoke-Group {
         [string]$Name,
         [string]$Mode,
         [string]$Binary,
+        [string[]]$LauncherCommand,
         [string]$VersionLabel,
         [string]$IngestPromptFile,
         [string]$DirectAnswerPromptFile
@@ -64,6 +68,12 @@ function Invoke-Group {
     if ($IngestPromptFile) {
         $common += @("--codeagent-auto-memory-ingest-prompt-file", (Resolve-Path -LiteralPath $IngestPromptFile).Path)
     }
+    if ($LauncherCommand.Count -gt 0) {
+        $common += @(
+            "--codeagent-auto-memory-launcher-command-json",
+            (ConvertTo-Json -InputObject @($LauncherCommand) -Compress)
+        )
+    }
     if ($DirectAnswerPromptFile) {
         $common += @("--codeagent-auto-memory-direct-answer-prompt-file", (Resolve-Path -LiteralPath $DirectAnswerPromptFile).Path)
     }
@@ -77,9 +87,9 @@ function Invoke-Group {
     if ($LASTEXITCODE -ne 0) { throw "[$Name] evaluation failed with exit code $LASTEXITCODE" }
 }
 
-Invoke-Group -Name "memory_off" -Mode "memory_off" -Binary $MemoryOffBinary -VersionLabel "memory-off" -IngestPromptFile $BaselineIngestPromptFile -DirectAnswerPromptFile $BaselineDirectAnswerPromptFile
-Invoke-Group -Name "baseline" -Mode "baseline" -Binary $BaselineBinary -VersionLabel $BaselineVersionLabel -IngestPromptFile $BaselineIngestPromptFile -DirectAnswerPromptFile $BaselineDirectAnswerPromptFile
-Invoke-Group -Name "candidate" -Mode "candidate" -Binary $CandidateBinary -VersionLabel $CandidateVersionLabel -IngestPromptFile $CandidateIngestPromptFile -DirectAnswerPromptFile $CandidateDirectAnswerPromptFile
+Invoke-Group -Name "memory_off" -Mode "memory_off" -Binary $MemoryOffBinary -LauncherCommand $MemoryOffLauncherCommand -VersionLabel "memory-off" -IngestPromptFile $BaselineIngestPromptFile -DirectAnswerPromptFile $BaselineDirectAnswerPromptFile
+Invoke-Group -Name "baseline" -Mode "baseline" -Binary $BaselineBinary -LauncherCommand $BaselineLauncherCommand -VersionLabel $BaselineVersionLabel -IngestPromptFile $BaselineIngestPromptFile -DirectAnswerPromptFile $BaselineDirectAnswerPromptFile
+Invoke-Group -Name "candidate" -Mode "candidate" -Binary $CandidateBinary -LauncherCommand $CandidateLauncherCommand -VersionLabel $CandidateVersionLabel -IngestPromptFile $CandidateIngestPromptFile -DirectAnswerPromptFile $CandidateDirectAnswerPromptFile
 
 $comparisonDir = Join-Path $outputRootPath "comparison"
 & $Python (Join-Path $repoRoot "evaluation\compare_memory_regression.py") `
@@ -91,4 +101,3 @@ if ($LASTEXITCODE -ne 0) { throw "Comparison failed with exit code $LASTEXITCODE
 
 Write-Host "Structural smoke run completed: $outputRootPath"
 Write-Host "Report: $(Join-Path $comparisonDir 'report.md')"
-

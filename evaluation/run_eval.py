@@ -142,6 +142,11 @@ def parse_args() -> argparse.Namespace:
         default=env_bool("CODEAGENT_NO_SESSION_PERSISTENCE", True),
     )
     parser.add_argument("--codeagent-auto-memory-binary", default=os.getenv("CODEAGENT_AUTO_MEMORY_BINARY", "codeagentcli"))
+    parser.add_argument(
+        "--codeagent-auto-memory-launcher-command-json",
+        default=os.getenv("CODEAGENT_AUTO_MEMORY_LAUNCHER_COMMAND_JSON"),
+        help='JSON argv used to launch CodeAgent, e.g. ["bun","D:/CodeAgent/src/cli.ts"]; overrides binary',
+    )
     parser.add_argument("--codeagent-auto-memory-model", default=os.getenv("CODEAGENT_AUTO_MEMORY_MODEL"))
     parser.add_argument("--codeagent-auto-memory-timeout-seconds", type=float, default=float(os.getenv("CODEAGENT_AUTO_MEMORY_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--codeagent-auto-memory-ingest-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_TURNS", "30")))
@@ -349,6 +354,19 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
             },
         }
     if args.method == "codeagent_auto_memory":
+        launcher_command = None
+        if args.codeagent_auto_memory_launcher_command_json is not None:
+            try:
+                launcher_command = json.loads(args.codeagent_auto_memory_launcher_command_json)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("Invalid CodeAgent launcher command JSON") from exc
+            if not (
+                isinstance(launcher_command, list)
+                and launcher_command
+                and all(isinstance(item, str) and item.strip() for item in launcher_command)
+            ):
+                raise RuntimeError("CodeAgent launcher command JSON must be a non-empty string array")
+
         def optional_prompt(path_value: str | None, label: str) -> str | None:
             if path_value is None:
                 return None
@@ -371,6 +389,7 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
             "memory_params": {
                 "codeagent_auto_memory_params": {
                     "binary": args.codeagent_auto_memory_binary,
+                    **({"launcher_command": launcher_command} if launcher_command is not None else {}),
                     "model": args.codeagent_auto_memory_model,
                     "timeout_seconds": args.codeagent_auto_memory_timeout_seconds,
                     "ingest_max_turns": args.codeagent_auto_memory_ingest_max_turns,

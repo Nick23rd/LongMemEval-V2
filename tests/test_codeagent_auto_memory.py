@@ -65,6 +65,29 @@ def test_codeagent_auto_memory_supports_direct_answers() -> None:
     assert isinstance(memory, EndToEndMemoryAgent)
 
 
+def test_source_launcher_command_is_used_for_version_and_sessions(tmp_path: Path) -> None:
+    config = _config(tmp_path / "workspace", tmp_path)
+    params = config["codeagent_auto_memory_params"]
+    assert isinstance(params, dict)
+    params["launcher_command"] = ["bun", "D:/CodeAgent/src/cli.ts"]
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "source-version\n", "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(config)
+        command = memory._command("prompt", 2, ingestion=False)
+
+    assert calls[0] == ["bun", "D:/CodeAgent/src/cli.ts", "--version"]
+    assert command[:2] == ["bun", "D:/CodeAgent/src/cli.ts"]
+    assert memory.memory_config["memory_params"]["codeagent_auto_memory_params"]["launcher_command"] == [
+        "bun",
+        "D:/CodeAgent/src/cli.ts",
+    ]
+
+
 def test_invalid_experiment_mode_is_rejected(tmp_path: Path) -> None:
     config = _config(tmp_path / "workspace", tmp_path)
     params = config["codeagent_auto_memory_params"]

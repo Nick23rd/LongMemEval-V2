@@ -163,6 +163,17 @@ class CodeAgentAutoMemory(StatefulMemory):
         params = dict(params_obj)
 
         self.binary = Path(str(params.get("binary", DEFAULT_BINARY)))
+        launcher_obj = params.get("launcher_command")
+        if launcher_obj is None:
+            self.launcher_command = [str(self.binary)]
+        else:
+            require(
+                isinstance(launcher_obj, list)
+                and launcher_obj
+                and all(isinstance(item, str) and item.strip() for item in launcher_obj),
+                "codeagent auto-memory launcher_command must be a non-empty list of non-empty strings",
+            )
+            self.launcher_command = [str(item) for item in launcher_obj]
         model = params.get("model")
         require(model is None or (isinstance(model, str) and model.strip()), "codeagent auto-memory model must be null or a non-empty string")
         self.model = model.strip() if isinstance(model, str) else None
@@ -249,7 +260,13 @@ class CodeAgentAutoMemory(StatefulMemory):
 
     def _detect_version(self) -> str | None:
         try:
-            result = subprocess.run([str(self.binary), "--version"], capture_output=True, text=True, timeout=10, check=False)
+            result = subprocess.run(
+                [*self.launcher_command, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
         except (OSError, subprocess.SubprocessError):
             return None
         return (result.stdout or result.stderr).strip() or None
@@ -258,6 +275,7 @@ class CodeAgentAutoMemory(StatefulMemory):
     def memory_config(self) -> MemoryConfig:
         params: dict[str, object] = {
             "binary": str(self.binary),
+            "launcher_command": list(self.launcher_command),
             "model": self.model,
             "timeout_seconds": self.timeout_seconds,
             "ingest_max_turns": self.ingest_max_turns,
@@ -293,6 +311,11 @@ class CodeAgentAutoMemory(StatefulMemory):
         requested_params.pop("resume_build", None)
         saved_params.pop("prompt_hashes", None)
         requested_params.pop("prompt_hashes", None)
+        for params in (saved_params, requested_params):
+            params.setdefault(
+                "launcher_command",
+                [str(params.get("binary", DEFAULT_BINARY))],
+            )
         for key, default in (
             ("experiment_mode", DEFAULT_EXPERIMENT_MODE),
             ("version_label", None),
@@ -335,7 +358,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         self.ingestion_plan = dict(metadata)
 
     def _command(self, prompt: str, max_turns: int, *, ingestion: bool) -> list[str]:
-        command = [str(self.binary), "-p", "--output-format", "json", "--no-session-persistence", "--max-turns", str(max_turns)]
+        command = [*self.launcher_command, "-p", "--output-format", "json", "--no-session-persistence", "--max-turns", str(max_turns)]
         if ingestion:
             command.extend(["--permission-mode", "acceptEdits", "--tools=Read,Write,Edit,Glob,Grep"])
         else:
@@ -461,7 +484,7 @@ class CodeAgentAutoMemory(StatefulMemory):
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
-        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_version, "binary": str(self.binary.resolve()), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
         _write_json(self.workspace_dir / "prompt_manifest.json", self._prompt_manifest())
         usage_totals: dict[str, float] = {}
         for record in self.ingestion_records:

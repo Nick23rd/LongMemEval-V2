@@ -79,6 +79,7 @@
 
 - [x] 使用 experiment mode 和现有运行目录/run args 标识实验运行。
 - [x] 保存 binary 绝对路径、检测版本和用户提供的 version label（代码提交可写入 version label）。
+- [x] 同时支持打包 `.exe` 和源码仓多段 launcher argv，并保存完整启动命令。
 - [x] 保存摄取、检索和直接回答提示词全文及 SHA-256。
 - [x] 保存 memory state 文件级哈希和整体摘要哈希。
 - [x] 保存轨迹集合、顺序和内容指纹。
