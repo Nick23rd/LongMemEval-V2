@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.compare_memory_attribution import build_attribution, load_results, render_html
+from evaluation.compare_memory_attribution import build_attribution, load_results, load_writer_metrics, render_html
 
 
 def row(question_id: str, score: bool, *, text: str = "question") -> dict[str, object]:
@@ -49,3 +49,19 @@ def test_render_html_contains_summary_and_escaped_question() -> None:
     assert "<!doctype html>" in output
     assert "&lt;unsafe&gt;" in output
     assert "写入策略 × 召回算法" in output
+
+
+def test_load_writer_metrics_reads_provenance_and_cost(tmp_path: Path) -> None:
+    (tmp_path / "ingestion_manifest.json").write_text(json.dumps({
+        "version_label": "candidate", "detected_ingest_version": "2.0",
+        "ingest_launcher_command": ["candidate.exe"], "prompt_hashes": {"ingest": "abc"},
+        "memory_snapshot_digest": "digest",
+    }), encoding="utf-8")
+    (tmp_path / "ingestion_metrics.json").write_text(json.dumps({
+        "trajectory_count": 10, "failed_attempt_count": 1,
+        "usage_totals": {"total_cost_usd": 1.25},
+    }), encoding="utf-8")
+    metrics = load_writer_metrics(tmp_path)
+    assert metrics["detected_version"] == "2.0"
+    assert metrics["trajectory_count"] == 10
+    assert metrics["usage"]["total_cost_usd"] == 1.25

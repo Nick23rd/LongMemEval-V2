@@ -128,6 +128,8 @@ if ($Resume -and (Test-Path -LiteralPath (Join-Path $reportDir "report.html"))) 
     & $Python (Join-Path $repoRoot "evaluation\compare_memory_attribution.py") `
         --aa (Join-Path $outputRootPath "aa\evaluate") --ab (Join-Path $outputRootPath "ab\evaluate") `
         --ba (Join-Path $outputRootPath "ba\evaluate") --bb (Join-Path $outputRootPath "bb\evaluate") `
+        --writer-a-state (Join-Path $outputRootPath "writer_a\build\memory_state") `
+        --writer-b-state (Join-Path $outputRootPath "writer_b\build\memory_state") `
         --output-dir $reportDir
     if ($LASTEXITCODE -ne 0) { throw "Attribution comparison failed with exit code $LASTEXITCODE" }
 }

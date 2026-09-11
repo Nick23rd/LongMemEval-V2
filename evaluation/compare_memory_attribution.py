@@ -37,6 +37,55 @@ def load_results(value: str | Path) -> dict[str, dict[str, Any]]:
     return rows
 
 
+def read_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else {}
+
+
+def load_writer_metrics(value: str | Path) -> dict[str, Any]:
+    state = Path(value).expanduser().resolve()
+    manifest = read_json(state / "ingestion_manifest.json")
+    metrics = read_json(state / "ingestion_metrics.json")
+    return {
+        "version_label": manifest.get("version_label"),
+        "detected_version": manifest.get("detected_ingest_version", manifest.get("detected_version")),
+        "launcher_command": manifest.get("ingest_launcher_command", manifest.get("launcher_command")),
+        "prompt_hash": (manifest.get("prompt_hashes") or {}).get("ingest"),
+        "memory_snapshot_digest": manifest.get("memory_snapshot_digest"),
+        "trajectory_count": metrics.get("trajectory_count"),
+        "attempt_count": metrics.get("attempt_count"),
+        "success_count": metrics.get("success_count"),
+        "failed_attempt_count": metrics.get("failed_attempt_count"),
+        "memory_file_count": metrics.get("memory_file_count"),
+        "memory_total_bytes": metrics.get("memory_total_bytes"),
+        "duration_seconds": metrics.get("total_duration_seconds"),
+        "usage": metrics.get("usage_totals") or {},
+    }
+
+
+def load_cell_metrics(value: str | Path) -> dict[str, Any]:
+    run_dir = Path(value).expanduser().resolve()
+    if run_dir.is_file():
+        run_dir = run_dir.parent
+    metrics = read_json(run_dir / "aggregated_metrics.json")
+    tokens = metrics.get("tokens") or {}
+    query = metrics.get("memory_query") or {}
+    summaries = [read_json(path) for path in run_dir.glob("memory_workspace/shared/answer_sessions/*/attempt_*/summary.json")]
+    usage = [item.get("usage") or {} for item in summaries]
+    return {
+        "prompt_tokens": tokens.get("prompt_tokens", 0),
+        "completion_tokens": tokens.get("completion_tokens", 0),
+        "total_tokens": tokens.get("total_tokens", 0),
+        "query_duration_seconds": query.get("total_seconds", 0),
+        "attempt_count": len(summaries),
+        "failed_attempt_count": sum(item.get("returncode") != 0 for item in summaries),
+        "timed_out_count": sum(bool(item.get("timed_out")) for item in summaries),
+        "total_cost_usd": sum(float(item.get("total_cost_usd", 0) or 0) for item in usage),
+    }
+
+
 def build_attribution(groups: dict[str, dict[str, dict[str, Any]]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     require(set(groups) == {"aa", "ab", "ba", "bb"}, "Attribution requires aa, ab, ba, and bb")
     id_sets = {name: set(rows) for name, rows in groups.items()}
@@ -130,6 +179,21 @@ def render_html(summary: dict[str, Any], diffs: list[dict[str, Any]]) -> str:
         f'<tr><td>{label}</td><td class="delta {"positive" if value > 0 else "negative" if value < 0 else "neutral"}">{percent(value, signed=True)}</td></tr>'
         for label, value in effects
     )
+    writer_rows = ""
+    for name, writer in summary.get("writers", {}).items():
+        usage = writer.get("usage") or {}
+        writer_rows += (
+            f"<tr><td><b>{name.upper()}</b></td><td>{escaped(writer.get('version_label') or writer.get('detected_version'))}</td>"
+            f"<td><code>{escaped(' '.join(writer.get('launcher_command') or []))}</code></td>"
+            f"<td>{writer.get('trajectory_count') or 0}</td><td>{writer.get('failed_attempt_count') or 0}</td>"
+            f"<td>{int(usage.get('input_tokens', 0) or 0):,} / {int(usage.get('output_tokens', 0) or 0):,}</td>"
+            f"<td>${float(usage.get('total_cost_usd', 0) or 0):.4f}</td><td>{float(writer.get('duration_seconds', 0) or 0):.1f}s</td></tr>"
+        )
+    cell_metric_rows = "".join(
+        f"<tr><td><b>{name.upper()}</b></td><td>{cell.get('total_tokens', 0):,}</td><td>${cell.get('total_cost_usd', 0):.4f}</td>"
+        f"<td>{float(cell.get('query_duration_seconds', 0) or 0):.1f}s</td><td>{cell.get('failed_attempt_count', 0)}</td></tr>"
+        for name, cell in summary.get("cells", {}).items()
+    )
     question_cards = []
     for row in diffs:
         response_cells = "".join(
@@ -151,7 +215,7 @@ h1{{font-size:30px;margin:0 0 6px}}h2{{font-size:18px;margin:30px 0 12px}}p{{mar
 .count{{background:#e8edff;color:var(--blue);padding:8px 13px;border-radius:20px;font-weight:700;white-space:nowrap}}
 .matrix{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}}.cell{{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 5px 18px #24365b0d}}
 .cell span{{font-weight:800;color:var(--blue)}}.cell strong{{display:block;font-size:27px;margin:9px 0 2px}}.cell small{{color:var(--muted)}}
-.panel{{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}}table{{width:100%;border-collapse:collapse}}td{{padding:13px 17px;border-bottom:1px solid var(--line)}}tr:last-child td{{border:0}}td:last-child{{text-align:right;font-weight:800}}
+.panel{{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:auto}}table{{width:100%;border-collapse:collapse}}th,td{{padding:13px 17px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}}th{{color:var(--muted);font-size:12px;text-transform:uppercase}}tr:last-child td{{border:0}}td:last-child{{text-align:right;font-weight:800}}
 .positive{{color:var(--green)}}.negative{{color:var(--red)}}.neutral{{color:var(--muted)}}.note{{padding:14px 17px;border-left:4px solid var(--blue);background:#eef2ff;border-radius:8px}}
 details{{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}}summary{{cursor:pointer;padding:14px 17px;display:flex;gap:12px;align-items:center;font-weight:700}}summary span{{color:var(--muted);font-weight:500}}
 .question{{padding:0 17px 17px;border-top:1px solid var(--line)}}.responses{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px}}.responses>div{{border:1px solid var(--line);border-radius:9px;padding:11px}}
@@ -160,6 +224,8 @@ details{{background:var(--panel);border:1px solid var(--line);border-radius:12px
 </style></head><body><main><header><div><h1>CodeAgent 记忆归因报告</h1><p class="muted">写入策略 × 召回算法 · 2×2 配对实验</p></div><div class="count">{summary['question_count']} 道题</div></header>
 <div class="matrix">{cell_cards}</div><h2>归因结果</h2><div class="panel"><table>{effect_rows}</table></div>
 <p class="note"><b>解读：</b>正值表示 B 优于 A，负值表示退化。交互效应不为零时，说明写入与召回的组合存在耦合。该诊断不替代端到端 baseline/candidate 回归结论。</p>
+<h2>写入构建与版本</h2><div class="panel"><table><thead><tr><th>写入</th><th>版本</th><th>Launcher</th><th>轨迹</th><th>失败尝试</th><th>输入/输出 Token</th><th>费用</th><th>耗时</th></tr></thead><tbody>{writer_rows}</tbody></table></div>
+<h2>召回资源消耗</h2><div class="panel"><table><thead><tr><th>单元</th><th>Token</th><th>费用</th><th>耗时</th><th>失败尝试</th></tr></thead><tbody>{cell_metric_rows}</tbody></table></div>
 <h2>逐题结果</h2>{''.join(question_cards)}</main></body></html>"""
 
 
@@ -167,10 +233,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare a 2x2 CodeAgent memory write/recall attribution run.")
     for name in ("aa", "ab", "ba", "bb"):
         parser.add_argument(f"--{name}", required=True)
+    parser.add_argument("--writer-a-state")
+    parser.add_argument("--writer-b-state")
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
     groups = {name: load_results(getattr(args, name)) for name in ("aa", "ab", "ba", "bb")}
     summary, diffs = build_attribution(groups)
+    summary["cells"] = {name: load_cell_metrics(getattr(args, name)) for name in ("aa", "ab", "ba", "bb")}
+    if args.writer_a_state and args.writer_b_state:
+        summary["writers"] = {
+            "writer_a": load_writer_metrics(args.writer_a_state),
+            "writer_b": load_writer_metrics(args.writer_b_state),
+        }
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=False)
     (output_dir / "attribution.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
