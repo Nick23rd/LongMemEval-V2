@@ -3,7 +3,7 @@ import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 import threading
-from typing import Literal, TypedDict
+from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
 
 
 class MemoryConfig(TypedDict):
@@ -14,6 +14,28 @@ class MemoryConfig(TypedDict):
 class MemoryContextItem(TypedDict):
     type: Literal["text", "image"]
     value: str
+
+
+class AgentAnswer(TypedDict):
+    """A final answer produced directly by an agent using its own memory."""
+
+    response_raw: str
+    usage: dict[str, Any] | None
+    duration_seconds: float
+    metadata: dict[str, Any]
+
+
+@runtime_checkable
+class EndToEndMemoryAgent(Protocol):
+    """Capability contract for backends that answer without an external reader."""
+
+    def answer(
+        self,
+        question: str,
+        question_image: str | None = None,
+    ) -> AgentAnswer:
+        """Return the agent's final answer using only its internal memory."""
+        ...
 
 
 def require(condition: bool, message: str) -> None:

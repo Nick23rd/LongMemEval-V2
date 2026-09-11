@@ -11,11 +11,11 @@
 
 任务状态约定：`[ ]` 未开始，`[-]` 进行中，`[x]` 已完成，`[!]` 受阻。
 
-当前总体状态：**目标与设计已完成，代码改造尚未开始**。
+当前总体状态：**Phase 1 已完成；Phase 0 的真实 CLI 最小实验仍需解决调用无响应问题**。
 
 ## 2. Phase 0：确认真实 CodeAgent 行为
 
-- [ ] 记录目标 binary 路径和 `--version` 输出。
+- [x] 记录目标 binary 路径和 `--version` 输出。
 - [ ] 验证 `CODEAGENT3_DISABLE_AUTO_MEMORY=0` 确实启用内部记忆。
 - [ ] 验证 `CODEAGENT3_DISABLE_AUTO_MEMORY=1` 完全关闭内部记忆。
 - [ ] 验证关闭记忆后，轨迹会话不生成 memory 文件。
@@ -29,14 +29,14 @@
 
 预计涉及 `memory_modules/memory.py`、`memory_modules/codeagent_auto_memory.py` 和对应测试。
 
-- [ ] 定义端到端回答结果类型 `AgentAnswer`。
-- [ ] 定义端到端 capability 接口或标识。
-- [ ] 保留 `Memory.query()`，确保检索型 backend 不受影响。
-- [ ] 为 `CodeAgentAutoMemory` 实现 `answer()`。
-- [ ] 返回原始回答、usage、延迟和审计元数据。
-- [ ] 查询前后比较冻结主记忆。
-- [ ] 确保每题使用独立 session/config 目录。
-- [ ] 为文本题和带图题增加测试。
+- [x] 定义端到端回答结果类型 `AgentAnswer`。
+- [x] 定义端到端 capability 接口或标识。
+- [x] 保留 `Memory.query()`，确保检索型 backend 不受影响。
+- [x] 为 `CodeAgentAutoMemory` 实现 `answer()`。
+- [x] 返回原始回答、usage、延迟和审计元数据。
+- [x] 查询前后比较冻结主记忆。
+- [x] 确保每题使用独立 session/config 目录。
+- [ ] 为带图题增加专门测试（文本题已覆盖）。
 
 验收：CodeAgent 的最终回答不经过 `MemoryContextItem`；原有 backend 测试继续通过。
 
@@ -188,7 +188,7 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | 目标确认 | 已完成 | 确认为修改前/后内部记忆机制的端到端回归评测 |
 | 2026-09-11 | 数据适用性 | 已完成 | 题目、haystack、答案和评分函数可以复用 |
 | 2026-09-11 | 改造设计 | 已完成 | 确认三组实验、直接回答、配对 diff 和归因实验 |
-| 2026-09-11 | 代码改造 | 未开始 | 等待按本计划实施 |
+| 2026-09-11 | Phase 0 | 部分完成 | 确认 `D:\Program Files\CodeAgentCLI\codeagentcli.exe` 版本 1.2605.00；真实调用 120 秒无结果，仍需验证记忆开关 |
+| 2026-09-11 | Phase 1 | 已完成 | 新增 `AgentAnswer`、`EndToEndMemoryAgent` 和 `CodeAgentAutoMemory.answer()`；12 tests、8 subtests 通过 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。
-

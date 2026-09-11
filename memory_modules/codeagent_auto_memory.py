@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .memory import MemoryConfig, MemoryContextItem, StatefulMemory, register_memory, require
+from .memory import AgentAnswer, MemoryConfig, MemoryContextItem, StatefulMemory, register_memory, require
 from .trajectory_store import materialize_prepared_trajectory, prepare_trajectory_insert
 
 
@@ -38,6 +38,15 @@ Use only auto memory formed by earlier historical sessions to find facts needed 
 Return concise, direct, source-aware memory evidence. Preserve changes over time, conflicts, and uncertainty. If memory contains insufficient relevant information, return exactly: No relevant memory found.
 
 Do not manufacture an answer from the question itself.
+"""
+
+DIRECT_ANSWER_PROMPT = """Answer the question in question.json directly.
+
+Use only your native auto memory formed by earlier historical work sessions. The original trajectories are unavailable. Do not guess from general knowledge.
+
+Follow the output-format instruction in the question exactly. If the relevant information is not available in your memory, return exactly: \\boxed{UNKNOWN}
+
+Do not describe memory retrieval and do not return a separate evidence section. Your result is the final answer that will be scored.
 """
 
 
@@ -234,7 +243,7 @@ class CodeAgentAutoMemory(StatefulMemory):
 
     def _ensure_layout(self) -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
-        for name in ("auto_memory", "ingestion_sessions", "query_sessions"):
+        for name in ("auto_memory", "ingestion_sessions", "query_sessions", "answer_sessions"):
             (self.workspace_dir / name).mkdir(parents=True, exist_ok=True)
 
     def _restore_checkpoint(self) -> None:
@@ -372,11 +381,51 @@ class CodeAgentAutoMemory(StatefulMemory):
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
+        summary = self._run_frozen_memory_question(
+            query=query,
+            query_image=query_image,
+            prompt=QUERY_PROMPT,
+            session_kind="query",
+        )
+        result = summary["result"]
+        require(isinstance(result, str), "CodeAgent query result must be text")
+        return [{"type": "text", "value": result.strip() + "\n"}]
+
+    def answer(self, question: str, question_image: str | None = None) -> AgentAnswer:
+        """Answer directly in a fresh session using the frozen native memory."""
+        summary = self._run_frozen_memory_question(
+            query=question,
+            query_image=question_image,
+            prompt=DIRECT_ANSWER_PROMPT,
+            session_kind="answer",
+        )
+        response_raw = summary["result"]
+        assert isinstance(response_raw, str)
+        return {
+            "response_raw": response_raw.strip(),
+            "usage": summary.get("usage") if isinstance(summary.get("usage"), dict) else None,
+            "duration_seconds": float(summary.get("duration_seconds", 0.0)),
+            "metadata": {
+                "query_invocation_id": summary["query_invocation_id"],
+                "attempt": summary["attempt"],
+                "main_memory_unchanged": summary["main_memory_unchanged"],
+            },
+        }
+
+    def _run_frozen_memory_question(
+        self,
+        *,
+        query: str,
+        query_image: str | None,
+        prompt: str,
+        session_kind: str,
+    ) -> dict[str, Any]:
         require(isinstance(query, str) and query.strip(), "codeagent_auto_memory query must be non-empty")
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
+        require(session_kind in {"query", "answer"}, f"Unsupported session kind: {session_kind}")
         invocation_id = self.get_query_context().get("query_invocation_id")
         require(isinstance(invocation_id, str) and invocation_id, "codeagent_auto_memory query requires query_invocation_id")
-        session_root = self.workspace_dir / "query_sessions" / _safe_name(invocation_id)
+        session_root = self.workspace_dir / f"{session_kind}_sessions" / _safe_name(invocation_id)
         source_memory = self.workspace_dir / "auto_memory"
         frozen_snapshot = _memory_snapshot(source_memory)
         last_summary: dict[str, Any] | None = None
@@ -396,8 +445,8 @@ class CodeAgentAutoMemory(StatefulMemory):
                 shutil.copy2(source_image, session_dir / image_name)
                 question_payload["image"] = image_name
             _write_json(session_dir / "question.json", question_payload)
-            summary = self._run(session_dir=session_dir, memory_dir=memory_snapshot, prompt=QUERY_PROMPT, max_turns=self.query_max_turns, ingestion=False)
-            summary.update({"query_invocation_id": invocation_id, "attempt": attempt, "main_memory_unchanged": _memory_snapshot(source_memory) == frozen_snapshot, "snapshot_after": _memory_snapshot(memory_snapshot)})
+            summary = self._run(session_dir=session_dir, memory_dir=memory_snapshot, prompt=prompt, max_turns=self.query_max_turns, ingestion=False)
+            summary.update({"query_invocation_id": invocation_id, "session_kind": session_kind, "attempt": attempt, "main_memory_unchanged": _memory_snapshot(source_memory) == frozen_snapshot, "snapshot_after": _memory_snapshot(memory_snapshot)})
             _write_json(session_dir / "summary.json", summary)
             _copy_audit_files(session_dir, audit_dir)
             shutil.rmtree(isolated_root)
@@ -405,7 +454,7 @@ class CodeAgentAutoMemory(StatefulMemory):
             result = summary.get("result")
             if summary["returncode"] == 0 and isinstance(result, str) and result.strip():
                 require(_memory_snapshot(source_memory) == frozen_snapshot, "Query mutated frozen main auto memory")
-                return [{"type": "text", "value": result.strip() + "\n"}]
+                return summary
         detail = last_summary or {}
         raise RuntimeError(f"CodeAgent auto-memory query failed after {self.query_max_attempts} attempts: returncode={detail.get('returncode')} timed_out={detail.get('timed_out')}")
 

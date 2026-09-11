@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from memory_modules.memory import MEMORY_TYPES, load_memory, save_memory
+from memory_modules.memory import EndToEndMemoryAgent, MEMORY_TYPES, load_memory, save_memory
 from evaluation.memory_lifecycle import build_stateful_memory
 
 
@@ -51,6 +51,11 @@ def test_codeagent_auto_memory_is_registered() -> None:
     assert MEMORY_TYPES["codeagent_auto_memory"] is CodeAgentAutoMemory
 
 
+def test_codeagent_auto_memory_supports_direct_answers() -> None:
+    memory = object.__new__(CodeAgentAutoMemory)
+    assert isinstance(memory, EndToEndMemoryAgent)
+
+
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
     screenshot = tmp_path / "state.png"
     screenshot.write_bytes(b"png")
@@ -89,6 +94,13 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         memory.set_query_context(query_invocation_id="question/one")
         context = memory.query("What locale was configured?")
         assert context == [{"type": "text", "value": "The remembered locale is zh-CN.\n"}]
+        memory.set_query_context(query_invocation_id="question/direct")
+        answer = memory.answer("What locale was configured? Wrap the answer in \\boxed{}.")
+        assert answer["response_raw"] == "The remembered locale is zh-CN."
+        assert answer["usage"] == {"input_tokens": 2, "output_tokens": 1}
+        assert answer["metadata"]["query_invocation_id"] == "question/direct"
+        assert answer["metadata"]["main_memory_unchanged"] is True
+        assert "directly" in calls[-1]["command"][-1]
         assert (workspace / "auto_memory" / "MEMORY.md").read_bytes() == main_before
         assert not (workspace / "auto_memory" / "query-only.md").exists()
 
@@ -103,10 +115,12 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         assert loaded.inserted_trajectory_ids == ["traj/one"]
         assert (loaded.workspace_dir / "auto_memory" / "MEMORY.md").read_text(encoding="utf-8") == "Locale is zh-CN.\n"
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0]["memory_dir"] != (workspace / "auto_memory").resolve()
     assert calls[1]["memory_dir"] != (workspace / "auto_memory").resolve()
+    assert calls[2]["memory_dir"] != (workspace / "auto_memory").resolve()
     assert calls[0]["memory_dir"] != calls[1]["memory_dir"]
+    assert calls[1]["memory_dir"] != calls[2]["memory_dir"]
 
 
 def test_failed_attempt_rolls_back_then_resume_skips_completed_trajectory(tmp_path: Path) -> None:
