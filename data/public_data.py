@@ -113,13 +113,19 @@ def materialize_runtime_haystack(
     tier: str,
     selected_questions: list[dict[str, Any]],
     output_path: Path,
+    trajectory_limit: int | None = None,
 ) -> dict[str, list[str]]:
     haystack = load_haystack(data_root, tier)
     selected_ids = [str(row["id"]) for row in selected_questions]
     out: dict[str, list[str]] = {}
+    if trajectory_limit is not None:
+        require(trajectory_limit > 0, "trajectory_limit must be positive")
     for question_id in selected_ids:
         require(question_id in haystack, f"Missing haystack entry for question {question_id}")
-        out[question_id] = list(haystack[question_id])
+        trajectory_ids = list(haystack[question_id])
+        if trajectory_limit is not None:
+            trajectory_ids = trajectory_ids[:trajectory_limit]
+        out[question_id] = trajectory_ids
     write_json(output_path, out)
     return out
 

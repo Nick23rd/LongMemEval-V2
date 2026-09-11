@@ -70,6 +70,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--method", choices=sorted(METHODS), required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--limit", type=int, default=None, help="Run only the first N selected questions")
+    parser.add_argument(
+        "--haystack-limit",
+        type=int,
+        default=None,
+        help="Use only the first N trajectories per haystack for structural smoke tests; never use for benchmark scores",
+    )
     parser.add_argument("--question-ids", nargs="*", default=None, help="Optional question ids, space or comma separated")
 
     parser.add_argument("--reader-model", default=os.getenv("READER_MODEL", "Qwen/Qwen3.5-9B"))
@@ -436,6 +442,17 @@ def main() -> None:
         tier=args.tier,
         selected_questions=selected_questions,
         output_path=runtime_dir / "haystack.json",
+        trajectory_limit=args.haystack_limit,
+    )
+    write_json(
+        runtime_dir / "data_selection.json",
+        {
+            "domain": args.domain,
+            "tier": args.tier,
+            "question_count": len(selected_questions),
+            "haystack_limit": args.haystack_limit,
+            "structural_smoke_only": args.haystack_limit is not None,
+        },
     )
     memory_config = build_memory_config(args, data_root)
     memory_config_path = runtime_dir / "memory_config.json"

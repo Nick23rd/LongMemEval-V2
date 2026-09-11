@@ -24,8 +24,14 @@ def load_json(path: Path) -> Any:
 
 def relative_symlink(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    relative_target = os.path.relpath(src, start=dst.parent)
-    dst.symlink_to(relative_target)
+    try:
+        relative_target = os.path.relpath(src, start=dst.parent)
+        dst.symlink_to(relative_target)
+    except (OSError, ValueError):
+        # Windows cannot create a relative path across drive letters, and some
+        # environments do not grant symlink privileges. A copied screenshot
+        # preserves the isolated trajectory semantics in both cases.
+        shutil.copy2(src, dst)
 
 
 def normalize_trajectory_pool_root(pool_root: Path) -> Path:

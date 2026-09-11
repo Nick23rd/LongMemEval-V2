@@ -90,6 +90,40 @@ Test-Path "$env:DATA_ROOT\trajectories.jsonl"
 
 `--limit 1` 表示选择一道评测题，不表示只处理一条 trajectory。该题 Small haystack 中的全部 trajectory 都会依次形成记忆，因此仍可能耗时并产生较多用量。
 
+如果只需要验证三组工程链路，可使用 `--haystack-limit` 截取每个 haystack 的前 N 条轨迹。该参数会改变正式评测数据，产物中的 `runtime_inputs/data_selection.json` 会标记 `structural_smoke_only: true`，因此结果不得作为 benchmark 分数。
+
+仓库提供三组结构冒烟脚本：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_regression.ps1 `
+  -DataRoot $env:DATA_ROOT `
+  -OutputRoot '.\runs\codeagent_memory_regression_smoke_01' `
+  -HaystackLimit 1 `
+  -Python $Python
+```
+
+脚本依次执行：
+
+```text
+memory_off 构建与直接回答
+→ baseline 构建与直接回答
+→ candidate 构建与直接回答
+→ 生成三组配对报告
+```
+
+默认选择真实题目 `05cce9b3`。baseline 和 candidate 默认使用同一 binary，仅用于验证流程；正式回归必须通过 `-BaselineBinary`、`-CandidateBinary`、版本标签或提示词文件传入真正的修改前后版本。
+
+产物位于：
+
+```text
+<OutputRoot>/memory_off/{build,evaluate}/
+<OutputRoot>/baseline/{build,evaluate}/
+<OutputRoot>/candidate/{build,evaluate}/
+<OutputRoot>/comparison/comparison.json
+<OutputRoot>/comparison/per_question_diff.jsonl
+<OutputRoot>/comparison/report.md
+```
+
 先用一道题验证完整的记忆形成和保存链路：
 
 ```powershell
