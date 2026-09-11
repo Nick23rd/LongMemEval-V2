@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.compare_memory_attribution import build_attribution, load_results
+from evaluation.compare_memory_attribution import build_attribution, load_results, render_html
 
 
 def row(question_id: str, score: bool, *, text: str = "question") -> dict[str, object]:
@@ -40,3 +40,12 @@ def test_load_results_rejects_duplicates(tmp_path: Path) -> None:
     path.write_text(encoded + "\n" + encoded + "\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="Duplicate question_id"):
         load_results(path)
+
+
+def test_render_html_contains_summary_and_escaped_question() -> None:
+    groups = {name: {"q": row("q", name == "bb", text="<unsafe>")} for name in ("aa", "ab", "ba", "bb")}
+    summary, diffs = build_attribution(groups)
+    output = render_html(summary, diffs)
+    assert "<!doctype html>" in output
+    assert "&lt;unsafe&gt;" in output
+    assert "写入策略 × 召回算法" in output
