@@ -126,6 +126,9 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
 
         saved = tmp_path / "saved"
         save_memory(memory, saved)
+        prompt_manifest = json.loads((saved / "prompt_manifest.json").read_text(encoding="utf-8"))
+        assert set(prompt_manifest) == {"ingest", "query", "direct_answer"}
+        assert len(prompt_manifest["direct_answer"]["sha256"]) == 64
         requested = {
             "memory_type": "codeagent_auto_memory",
             "memory_params": _config(tmp_path / "loaded-workspace", tmp_path),

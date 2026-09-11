@@ -96,6 +96,10 @@ def _snapshot_digest(snapshot: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _text_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _replace_tree(source: Path, destination: Path) -> None:
     replacement = destination.with_name(destination.name + ".replacement")
     backup = destination.with_name(destination.name + ".backup")
@@ -173,6 +177,25 @@ class CodeAgentAutoMemory(StatefulMemory):
             f"codeagent auto-memory experiment_mode must be one of {sorted(EXPERIMENT_MODES)}",
         )
         self.experiment_mode = experiment_mode
+        version_label = params.get("version_label")
+        require(
+            version_label is None or (isinstance(version_label, str) and version_label.strip()),
+            "codeagent auto-memory version_label must be null or a non-empty string",
+        )
+        self.version_label = version_label.strip() if isinstance(version_label, str) else None
+        self.ingest_prompt = self._resolve_prompt(params, "ingest_prompt", INGEST_PROMPT)
+        self.query_prompt = self._resolve_prompt(params, "query_prompt", QUERY_PROMPT)
+        self.direct_answer_prompt = self._resolve_prompt(
+            params, "direct_answer_prompt", DIRECT_ANSWER_PROMPT
+        )
+        supplied_hashes = params.get("prompt_hashes")
+        if supplied_hashes is not None:
+            require(isinstance(supplied_hashes, dict), "prompt_hashes must be an object")
+            require(
+                supplied_hashes
+                == {name: item["sha256"] for name, item in self._prompt_manifest().items()},
+                "Saved prompt hashes do not match the configured prompt text",
+            )
         self.require_memory_write = params.get("require_memory_write", False)
         self.resume_build = params.get("resume_build", False)
         extra_args = params.get("extra_args", [])
@@ -205,6 +228,25 @@ class CodeAgentAutoMemory(StatefulMemory):
             self._ensure_layout()
             self._restore_checkpoint()
 
+    @staticmethod
+    def _resolve_prompt(params: dict[str, object], key: str, default: str) -> str:
+        value = params.get(key, default)
+        require(
+            isinstance(value, str) and value.strip(),
+            f"codeagent auto-memory {key} must be a non-empty string",
+        )
+        return value
+
+    def _prompt_manifest(self) -> dict[str, dict[str, str]]:
+        return {
+            "ingest": {"text": self.ingest_prompt, "sha256": _text_digest(self.ingest_prompt)},
+            "query": {"text": self.query_prompt, "sha256": _text_digest(self.query_prompt)},
+            "direct_answer": {
+                "text": self.direct_answer_prompt,
+                "sha256": _text_digest(self.direct_answer_prompt),
+            },
+        }
+
     def _detect_version(self) -> str | None:
         try:
             result = subprocess.run([str(self.binary), "--version"], capture_output=True, text=True, timeout=10, check=False)
@@ -223,6 +265,13 @@ class CodeAgentAutoMemory(StatefulMemory):
             "ingest_max_attempts": self.ingest_max_attempts,
             "query_max_attempts": self.query_max_attempts,
             "experiment_mode": self.experiment_mode,
+            "version_label": self.version_label,
+            "ingest_prompt": self.ingest_prompt,
+            "query_prompt": self.query_prompt,
+            "direct_answer_prompt": self.direct_answer_prompt,
+            "prompt_hashes": {
+                name: item["sha256"] for name, item in self._prompt_manifest().items()
+            },
             "require_memory_write": self.require_memory_write,
             "resume_build": self.resume_build,
             "extra_args": list(self.extra_args),
@@ -242,6 +291,17 @@ class CodeAgentAutoMemory(StatefulMemory):
         requested_params.pop("detected_version", None)
         saved_params.pop("resume_build", None)
         requested_params.pop("resume_build", None)
+        saved_params.pop("prompt_hashes", None)
+        requested_params.pop("prompt_hashes", None)
+        for key, default in (
+            ("experiment_mode", DEFAULT_EXPERIMENT_MODE),
+            ("version_label", None),
+            ("ingest_prompt", INGEST_PROMPT),
+            ("query_prompt", QUERY_PROMPT),
+            ("direct_answer_prompt", DIRECT_ANSWER_PROMPT),
+        ):
+            saved_params.setdefault(key, default)
+            requested_params.setdefault(key, default)
         require(saved_params == requested_params, "codeagent_auto_memory requested config does not match saved ingestion config")
         effective = {
             "memory_type": cls.memory_type,
@@ -353,7 +413,7 @@ class CodeAgentAutoMemory(StatefulMemory):
             isolated_memory = session_dir / "auto_memory"
             shutil.copytree(main_memory, isolated_memory)
             materialize_prepared_trajectory(prepared, session_dir / "trajectory")
-            summary = self._run(session_dir=session_dir, memory_dir=isolated_memory, prompt=INGEST_PROMPT, max_turns=self.ingest_max_turns, ingestion=True)
+            summary = self._run(session_dir=session_dir, memory_dir=isolated_memory, prompt=self.ingest_prompt, max_turns=self.ingest_max_turns, ingestion=True)
             after = _memory_snapshot(isolated_memory)
             changes = _snapshot_diff(before, after)
             changed = any(changes.values())
@@ -401,7 +461,8 @@ class CodeAgentAutoMemory(StatefulMemory):
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
-        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_version, "binary": str(self.binary.resolve()), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "prompt_manifest.json", self._prompt_manifest())
         usage_totals: dict[str, float] = {}
         for record in self.ingestion_records:
             usage = record.get("usage")
@@ -434,7 +495,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         summary = self._run_frozen_memory_question(
             query=query,
             query_image=query_image,
-            prompt=QUERY_PROMPT,
+            prompt=self.query_prompt,
             session_kind="query",
         )
         result = summary["result"]
@@ -446,7 +507,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         summary = self._run_frozen_memory_question(
             query=question,
             query_image=question_image,
-            prompt=DIRECT_ANSWER_PROMPT,
+            prompt=self.direct_answer_prompt,
             session_kind="answer",
         )
         response_raw = summary["result"]
@@ -515,7 +576,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         self.finalize_build()
         shutil.copytree(self.workspace_dir / "auto_memory", output_dir / "auto_memory", dirs_exist_ok=True)
-        for filename in ("ingestion_manifest.json", "ingestion_metrics.json"):
+        for filename in ("ingestion_manifest.json", "ingestion_metrics.json", "prompt_manifest.json"):
             shutil.copy2(self.workspace_dir / filename, output_dir / filename)
 
     def _load_backend(self, input_dir: Path) -> None:
@@ -530,6 +591,13 @@ class CodeAgentAutoMemory(StatefulMemory):
         require(
             manifest.get("experiment_mode", DEFAULT_EXPERIMENT_MODE) == self.experiment_mode,
             "Saved auto-memory experiment mode does not match requested mode",
+        )
+        saved_version = manifest.get("detected_version")
+        require(
+            saved_version is None
+            or self.detected_version is None
+            or saved_version == self.detected_version,
+            f"Saved CodeAgent version {saved_version!r} does not match runtime {self.detected_version!r}",
         )
         require(manifest.get("build_status") in {"complete", "complete_with_empty_ingestions", "complete_memory_off"}, f"Saved auto-memory build is not complete: {manifest.get('build_status')}")
         self.inserted_trajectory_ids = list(manifest.get("trajectory_ids", []))

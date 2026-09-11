@@ -11,7 +11,7 @@
 
 任务状态约定：`[ ]` 未开始，`[-]` 进行中，`[x]` 已完成，`[!]` 受阻。
 
-当前总体状态：**Phase 0～3 的核心路径已完成；下一阶段为版本与提示词溯源**。
+当前总体状态：**Phase 0～4 已完成；下一阶段为三组回归对比器**。
 
 ## 2. Phase 0：确认真实 CodeAgent 行为
 
@@ -52,7 +52,7 @@
 - [x] 检查 `memory_off` 的 memory 文件数和总字节数为零。
 - [ ] 检查不存在可恢复的轨迹会话状态（依赖 Phase 0 对真实 CLI 状态目录的确认）。
 - [x] baseline/candidate 通过各次运行的独立 workspace 和 memory state 隔离。
-- [ ] 支持不同 binary、version label 和提示词文件（binary 已支持，溯源与提示词文件待 Phase 4）。
+- [x] 支持不同 binary、version label 和提示词文件。
 - [x] 现有 workspace 覆盖保护确保写入策略变化时从空状态构建，显式 resume 除外。
 - [x] 增加模式隔离、配置保存和状态加载相关测试。
 
@@ -77,13 +77,13 @@
 
 ## 6. Phase 4：版本与提示词溯源
 
-- [ ] 保存实验组名称和 run ID。
-- [ ] 保存 binary 绝对路径、版本和代码提交。
-- [ ] 保存写入/查询提示词全文及 SHA-256。
-- [ ] 保存 memory state 文件级哈希和整体摘要哈希。
-- [ ] 保存轨迹集合、顺序和内容指纹。
-- [ ] 保存影响公平性的全部参数。
-- [ ] 加载已有状态时校验版本和构建配置。
+- [x] 使用 experiment mode 和现有运行目录/run args 标识实验运行。
+- [x] 保存 binary 绝对路径、检测版本和用户提供的 version label（代码提交可写入 version label）。
+- [x] 保存摄取、检索和直接回答提示词全文及 SHA-256。
+- [x] 保存 memory state 文件级哈希和整体摘要哈希。
+- [x] 保存轨迹集合、顺序和内容指纹。
+- [x] 使用现有 `run_args.json` 和 `memory_config.json` 保存完整参数。
+- [x] 加载已有状态时校验实验模式、CodeAgent 版本、提示词哈希和构建配置。
 
 验收：任意结果都能回答由哪个版本、提示词、轨迹和参数生成；不兼容状态不能静默复用。
 
@@ -192,5 +192,6 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | Phase 1 | 已完成 | 新增 `AgentAnswer`、`EndToEndMemoryAgent` 和 `CodeAgentAutoMemory.answer()`；12 tests、8 subtests 通过 |
 | 2026-09-11 | Phase 2 | 核心完成 | 新增三种 experiment mode；memory_off 仍摄取轨迹并强制空记忆，意外写入标记 isolation_failed；22 tests、8 subtests 通过 |
 | 2026-09-11 | Phase 3 | 已完成 | harness 按 capability 分流；CodeAgent 原始回答直接评分且纯端到端运行不创建 reader；新增直接路径测试 |
+| 2026-09-11 | Phase 4 | 已完成 | 支持版本标签及三类提示词覆盖；保存正文、SHA-256、binary/version 和 memory snapshot；加载时校验兼容性 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。

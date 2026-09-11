@@ -147,6 +147,10 @@ def parse_args() -> argparse.Namespace:
         choices=["memory_off", "baseline", "candidate"],
         default=os.getenv("CODEAGENT_AUTO_MEMORY_EXPERIMENT_MODE", "baseline"),
     )
+    parser.add_argument("--codeagent-auto-memory-version-label", default=os.getenv("CODEAGENT_AUTO_MEMORY_VERSION_LABEL"))
+    parser.add_argument("--codeagent-auto-memory-ingest-prompt-file", default=os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_PROMPT_FILE"))
+    parser.add_argument("--codeagent-auto-memory-query-prompt-file", default=os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_PROMPT_FILE"))
+    parser.add_argument("--codeagent-auto-memory-direct-answer-prompt-file", default=os.getenv("CODEAGENT_AUTO_MEMORY_DIRECT_ANSWER_PROMPT_FILE"))
     parser.add_argument("--codeagent-auto-memory-require-memory-write", action=argparse.BooleanOptionalAction, default=env_bool("CODEAGENT_AUTO_MEMORY_REQUIRE_MEMORY_WRITE", False))
     parser.add_argument("--codeagent-auto-memory-resume-build", action=argparse.BooleanOptionalAction, default=env_bool("CODEAGENT_AUTO_MEMORY_RESUME_BUILD", False))
     parser.add_argument("--save-memory", action="store_true")
@@ -339,6 +343,23 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
             },
         }
     if args.method == "codeagent_auto_memory":
+        def optional_prompt(path_value: str | None, label: str) -> str | None:
+            if path_value is None:
+                return None
+            path = Path(path_value).expanduser().resolve()
+            if not path.is_file():
+                raise RuntimeError(f"Missing {label} prompt file: {path}")
+            text = path.read_text(encoding="utf-8")
+            if not text.strip():
+                raise RuntimeError(f"Empty {label} prompt file: {path}")
+            return text
+
+        prompt_overrides = {
+            "ingest_prompt": optional_prompt(args.codeagent_auto_memory_ingest_prompt_file, "ingest"),
+            "query_prompt": optional_prompt(args.codeagent_auto_memory_query_prompt_file, "query"),
+            "direct_answer_prompt": optional_prompt(args.codeagent_auto_memory_direct_answer_prompt_file, "direct answer"),
+        }
+        prompt_overrides = {key: value for key, value in prompt_overrides.items() if value is not None}
         return {
             "memory_type": "codeagent_auto_memory",
             "memory_params": {
@@ -351,6 +372,8 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                     "ingest_max_attempts": args.codeagent_auto_memory_ingest_max_attempts,
                     "query_max_attempts": args.codeagent_auto_memory_query_max_attempts,
                     "experiment_mode": args.codeagent_auto_memory_experiment_mode,
+                    "version_label": args.codeagent_auto_memory_version_label,
+                    **prompt_overrides,
                     "require_memory_write": args.codeagent_auto_memory_require_memory_write,
                     "resume_build": args.codeagent_auto_memory_resume_build,
                     "extra_args": [],
