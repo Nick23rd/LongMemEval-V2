@@ -162,6 +162,7 @@
 - [ ] fake CLI 模拟查询修改主记忆并验证失败。
 - [ ] 真实 CodeAgent + 一条合成轨迹最小验证。
 - [x] 真实数据精选题、每组一条轨迹的三组结构冒烟。
+- [x] 真实数据精选题完成 AA/AB/BA/BB 归因闭环。
 - [ ] small tier 完整报告。
 - [ ] 原有 backend 注册、加载和 reader 路径继续通过。
 - [ ] 旧 memory state 给出明确兼容或拒绝信息。
@@ -199,6 +200,8 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | Phase 8 | 部分完成 | 新增 `--haystack-limit` 和 PowerShell 三组冒烟脚本；真实题 `05cce9b3` 完成构建、直接回答和比较闭环；memory_off 为零记忆文件 |
 | 2026-09-11 | Phase 8 | small 入口完成 | 新增正式 `run_codeagent_memory_regression_small.ps1`；按领域运行全部题目和完整 small haystack，并要求显式成本确认 |
 | 2026-09-11 | Phase 6 | 已完成 | 分离写入与查询 launcher；新增 AA/AB/BA/BB 四象限入口和独立归因报告，计算条件写入效应、条件召回效应及交互效应 |
+| 2026-09-11 | Phase 6 | 真实冒烟通过 | `05cce9b3`、每个写入组 1 条轨迹完成两次独立构建和四次交叉查询，产物为 `runs/codeagent_memory_attribution_smoke_20260911_03/attribution/report.md`；A/B 使用同一 CLI，因此四项差值均为零，符合预期 |
+| 2026-09-11 | Phase 6 | 稳定性发现 | 3 条轨迹冒烟的第 2 条在 DeepSeek 上达到 30 turns 后失败并被标记 `partial_failed`；正式 small 前需提高 turn 上限或收紧摄取提示词 |
 | 2026-09-11 | 基础设施修复 | 已完成 | Windows 临时目录与数据位于不同盘符时，相对截图链接安全回退为文件复制 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。
