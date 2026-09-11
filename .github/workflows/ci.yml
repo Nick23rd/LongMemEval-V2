@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Run tests
+        run: python -m pytest
+      - name: Verify packaged assets
+        run: |
+          python -m pip install build
+          python -m build --wheel
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          wheel = next(Path("dist").glob("*.whl"))
+          expected = {
+              "memory_modules/assets/agentrunbook_c/INSTRUCTION.md",
+              "memory_modules/assets/agentrunbook_c/scripts/inspect_trajectory.py",
+              "memory_modules/assets/agentrunbook_c/scripts/render_trajectory_summary.py",
+              "memory_modules/assets/agentrunbook_online_learning/CONSOLIDATE_STRATEGY.md",
+              "memory_modules/assets/agentrunbook_online_learning/LEARNED_RETRIEVAL_STRATEGY_SKELETON.md",
+          }
+          with zipfile.ZipFile(wheel) as archive:
+              missing = expected - set(archive.namelist())
+          if missing:
+              raise SystemExit(f"Missing packaged assets: {sorted(missing)}")
+          PY

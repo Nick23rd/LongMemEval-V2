@@ -16,13 +16,17 @@ def require(condition: bool, message: str) -> None:
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     require(path.exists(), f"Missing JSONL file: {path}")
     records: list[dict[str, Any]] = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        payload = json.loads(stripped)
-        require(isinstance(payload, dict), f"Line {line_no} in {path} is not a JSON object")
-        records.append(payload)
+    with path.open(encoding="utf-8") as lines:
+        for line_no, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Invalid JSON in {path} at line {line_no}: {exc.msg}") from exc
+            require(isinstance(payload, dict), f"Line {line_no} in {path} is not a JSON object")
+            records.append(payload)
     return records
 
 
@@ -125,16 +129,30 @@ def materialize_runtime_haystack(
 
 
 def _safe_extract_tar(tar_path: Path, destination: Path) -> None:
-    destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path, "r:*") as archive:
         destination_resolved = destination.resolve()
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        for member in members:
+            require(
+                member.isfile() or member.isdir(),
+                f"Refusing non-file archive member: {member.name}",
+            )
             member_target = (destination / member.name).resolve()
             require(
                 destination_resolved == member_target or destination_resolved in member_target.parents,
                 f"Refusing unsafe archive member path: {member.name}",
             )
-        archive.extractall(destination)
+        destination.mkdir(parents=True, exist_ok=True)
+        for member in members:
+            member_target = destination / member.name
+            if member.isdir():
+                member_target.mkdir(parents=True, exist_ok=True)
+                continue
+            member_target.parent.mkdir(parents=True, exist_ok=True)
+            source = archive.extractfile(member)
+            require(source is not None, f"Could not read archive member: {member.name}")
+            with source, member_target.open("wb") as output:
+                shutil.copyfileobj(source, output)
 
 
 def _relative_symlink(src: Path, dst: Path) -> None:
@@ -220,6 +238,7 @@ def validate_public_data(data_root: Path, *, tier: str, check_screenshots: bool 
     trajectories = load_trajectories(data_root)
     haystack = load_haystack(data_root, tier)
     question_ids = {str(row["id"]) for row in questions}
+    question_domains = {str(row["id"]): row.get("domain") for row in questions}
     require(set(haystack).issubset(question_ids), "Haystack contains unknown question ids")
     missing_haystack = question_ids - set(haystack)
     require(not missing_haystack, f"Questions missing haystack entries: {sorted(missing_haystack)[:10]}")
@@ -228,7 +247,7 @@ def validate_public_data(data_root: Path, *, tier: str, check_screenshots: bool 
         require(isinstance(row.get("question"), str) and row["question"].strip(), f"Invalid question text: {row.get('id')}")
         resolve_question_image(data_root, row.get("image"))
     for question_id, trajectory_ids in haystack.items():
-        question_domain = next(row["domain"] for row in questions if row["id"] == question_id)
+        question_domain = question_domains[question_id]
         seen: set[str] = set()
         for trajectory_id in trajectory_ids:
             require(trajectory_id in trajectories, f"Unknown trajectory id {trajectory_id} in {question_id}")
