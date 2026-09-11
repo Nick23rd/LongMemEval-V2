@@ -4,6 +4,13 @@ param(
     [Parameter(Mandatory = $true)][switch]$ConfirmFullRun,
     [string]$Domain = "web",
     [string]$Python = "python",
+    [switch]$Resume,
+    [string]$CodeAgentModel = "",
+    [int]$IngestMaxTurns = 60,
+    [int]$QueryMaxTurns = 20,
+    [int]$IngestMaxAttempts = 2,
+    [int]$QueryMaxAttempts = 2,
+    [double]$TimeoutSeconds = 1800,
     [string]$WriterABinary = "codeagentcli",
     [string]$WriterBBinary = "codeagentcli",
     [string]$RecallABinary = "codeagentcli",
@@ -24,7 +31,10 @@ $ErrorActionPreference = "Stop"
 if (-not $ConfirmFullRun) { throw "Pass -ConfirmFullRun to acknowledge the full small-tier 2x2 run cost." }
 $runner = Join-Path $PSScriptRoot "run_codeagent_memory_attribution.ps1"
 & $runner -DataRoot $DataRoot -OutputRoot $OutputRoot -Domain $Domain -Tier "small" -AllQuestions -FullHaystack `
-    -Python $Python -WriterABinary $WriterABinary -WriterBBinary $WriterBBinary `
+    -Python $Python -Resume:$Resume -CodeAgentModel $CodeAgentModel `
+    -IngestMaxTurns $IngestMaxTurns -QueryMaxTurns $QueryMaxTurns `
+    -IngestMaxAttempts $IngestMaxAttempts -QueryMaxAttempts $QueryMaxAttempts -TimeoutSeconds $TimeoutSeconds `
+    -WriterABinary $WriterABinary -WriterBBinary $WriterBBinary `
     -RecallABinary $RecallABinary -RecallBBinary $RecallBBinary `
     -WriterALauncherCommand $WriterALauncherCommand -WriterBLauncherCommand $WriterBLauncherCommand `
     -RecallALauncherCommand $RecallALauncherCommand -RecallBLauncherCommand $RecallBLauncherCommand `

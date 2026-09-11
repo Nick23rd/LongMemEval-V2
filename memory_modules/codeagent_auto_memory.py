@@ -486,7 +486,12 @@ class CodeAgentAutoMemory(StatefulMemory):
         if self.experiment_mode == "memory_off":
             require(not before, "memory_off requires an empty persistent memory directory")
         final_record: dict[str, Any] | None = None
-        for attempt in range(1, self.ingest_max_attempts + 1):
+        previous_attempts = sum(
+            item.get("trajectory_id") == prepared.trajectory_id
+            for item in self.ingestion_records
+        )
+        for invocation_attempt in range(1, self.ingest_max_attempts + 1):
+            attempt = previous_attempts + invocation_attempt
             audit_dir = self.workspace_dir / "ingestion_sessions" / f"{session_index:04d}_{_safe_name(prepared.trajectory_id)}" / f"attempt_{attempt:03d}"
             isolated_root = Path(tempfile.mkdtemp(prefix="longmemeval_codeagent_ingest_"))
             session_dir = isolated_root / "session"

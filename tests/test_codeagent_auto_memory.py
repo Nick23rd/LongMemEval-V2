@@ -111,6 +111,31 @@ def test_query_launcher_override_requires_explicit_attribution_mode(tmp_path: Pa
     assert effective_params["query_launcher_command"] == ["candidate-codeagent"]
 
 
+def test_resumed_failed_trajectory_uses_next_attempt_number(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess([], 0, "version\n", "")
+        initial = CodeAgentAutoMemory(_config(workspace, tmp_path))
+        initial.ingestion_records = [{"trajectory_id": "trajectory-1", "attempt": 1, "status": "failed"}]
+        initial._write_manifests(status="partial_failed")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run") as run:
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, "version\n", ""),
+            subprocess.CompletedProcess([], 1, "", "failed"),
+        ]
+        resumed_config = _config(workspace, tmp_path, resume_build=True)
+        resumed_config["codeagent_auto_memory_params"]["ingest_max_attempts"] = 1
+        resumed = CodeAgentAutoMemory(resumed_config)
+        with pytest.raises(RuntimeError, match="after 1 attempts"):
+            resumed.insert(_trajectory(screenshot, "trajectory-1"))
+
+    summary_path = next(workspace.glob("ingestion_sessions/*/attempt_002/summary.json"))
+    assert json.loads(summary_path.read_text(encoding="utf-8"))["attempt"] == 2
+
+
 def test_invalid_experiment_mode_is_rejected(tmp_path: Path) -> None:
     config = _config(tmp_path / "workspace", tmp_path)
     params = config["codeagent_auto_memory_params"]
