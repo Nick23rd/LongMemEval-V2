@@ -11,17 +11,17 @@
 
 任务状态约定：`[ ]` 未开始，`[-]` 进行中，`[x]` 已完成，`[!]` 受阻。
 
-当前总体状态：**Phase 1 已完成；Phase 0 的真实 CLI 最小实验仍需解决调用无响应问题**。
+当前总体状态：**Phase 0、Phase 1 已完成；Phase 2 的实验模式核心逻辑已完成，版本/提示词溯源仍待 Phase 4**。
 
 ## 2. Phase 0：确认真实 CodeAgent 行为
 
 - [x] 记录目标 binary 路径和 `--version` 输出。
-- [ ] 验证 `CODEAGENT3_DISABLE_AUTO_MEMORY=0` 确实启用内部记忆。
-- [ ] 验证 `CODEAGENT3_DISABLE_AUTO_MEMORY=1` 完全关闭内部记忆。
-- [ ] 验证关闭记忆后，轨迹会话不生成 memory 文件。
-- [ ] 验证 `--no-session-persistence` 后无法恢复轨迹会话。
-- [ ] 确认查询内部记忆所需的工具和权限。
-- [ ] 记录环境变量、config 目录和 memory 目录的真实作用。
+- [x] 验证 `CODEAGENT3_DISABLE_AUTO_MEMORY=0` 确实启用内部记忆。
+- [x] 验证 `CODEAGENT3_DISABLE_AUTO_MEMORY=1` 完全关闭内部记忆。
+- [x] 验证关闭记忆后，轨迹会话不生成 memory 文件。
+- [x] 验证 `--no-session-persistence` 下轨迹和问题使用不同的新 session，工作目录不保存会话文件。
+- [x] 确认查询内部记忆需要只读 `Read` 工具。
+- [x] 记录环境变量、config 目录和 memory 目录的真实作用。
 
 验收：用真实 CLI 最小样例证明有记忆的新会话可回答，而关闭记忆的新会话不能从旧会话获取信息。
 
@@ -44,17 +44,17 @@
 
 预计涉及 `codeagent_auto_memory.py`、`run_eval.py`、memory config 和运行脚本。
 
-- [ ] 增加 `experiment_mode`：`memory_off`、`baseline`、`candidate`。
-- [ ] 未知模式立即报错。
-- [ ] 三种模式均执行相同轨迹摄取调用。
-- [ ] `memory_off` 在摄取和查询阶段均关闭 auto-memory。
-- [ ] `memory_off` 不启用 `require_memory_write`。
-- [ ] 检查 `memory_off` 的 memory 文件数和总字节数为零。
-- [ ] 检查不存在可恢复的轨迹会话状态。
-- [ ] baseline/candidate 使用独立 workspace 和 memory state。
-- [ ] 支持不同 binary、version label 和提示词文件。
-- [ ] 写入策略变化时强制从空状态独立构建。
-- [ ] 增加模式隔离、配置保存和状态加载测试。
+- [x] 增加 `experiment_mode`：`memory_off`、`baseline`、`candidate`。
+- [x] 未知模式立即报错。
+- [x] 三种模式均执行相同轨迹摄取调用。
+- [x] `memory_off` 在摄取和查询阶段均关闭 auto-memory。
+- [x] `memory_off` 不启用 `require_memory_write`。
+- [x] 检查 `memory_off` 的 memory 文件数和总字节数为零。
+- [ ] 检查不存在可恢复的轨迹会话状态（依赖 Phase 0 对真实 CLI 状态目录的确认）。
+- [x] baseline/candidate 通过各次运行的独立 workspace 和 memory state 隔离。
+- [ ] 支持不同 binary、version label 和提示词文件（binary 已支持，溯源与提示词文件待 Phase 4）。
+- [x] 现有 workspace 覆盖保护确保写入策略变化时从空状态构建，显式 resume 除外。
+- [x] 增加模式隔离、配置保存和状态加载相关测试。
 
 验收：三组轨迹 ID、内容指纹、顺序和处理次数一致；`memory_off` 不留下跨会话状态。
 
@@ -188,7 +188,8 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | 目标确认 | 已完成 | 确认为修改前/后内部记忆机制的端到端回归评测 |
 | 2026-09-11 | 数据适用性 | 已完成 | 题目、haystack、答案和评分函数可以复用 |
 | 2026-09-11 | 改造设计 | 已完成 | 确认三组实验、直接回答、配对 diff 和归因实验 |
-| 2026-09-11 | Phase 0 | 部分完成 | 确认 `D:\Program Files\CodeAgentCLI\codeagentcli.exe` 版本 1.2605.00；真实调用 120 秒无结果，仍需验证记忆开关 |
+| 2026-09-11 | Phase 0 | 已完成 | CLI 1.2605.00 + deepseek-v4-pro 完成 `ZEBRA-7419` 双组实验：enabled 跨会话召回，memory_off 返回 UNKNOWN 且零 memory 文件；确认查询需要 Read |
 | 2026-09-11 | Phase 1 | 已完成 | 新增 `AgentAnswer`、`EndToEndMemoryAgent` 和 `CodeAgentAutoMemory.answer()`；12 tests、8 subtests 通过 |
+| 2026-09-11 | Phase 2 | 核心完成 | 新增三种 experiment mode；memory_off 仍摄取轨迹并强制空记忆，意外写入标记 isolation_failed；22 tests、8 subtests 通过 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。

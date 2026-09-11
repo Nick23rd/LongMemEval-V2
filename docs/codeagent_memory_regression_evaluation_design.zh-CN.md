@@ -210,3 +210,17 @@ B 写入形成的记忆 + 固定召回
 
 现有数据、标准答案和评分函数足以支持目标评测。主要工程改造是：端到端直接回答接口、真正读取轨迹的 `memory_off`、harness 绕过外部 reader、baseline/candidate 独立构建与版本溯源，以及三组逐题配对对比器。
 
+## 11. 已验证的真实 CLI 行为（2026-09-11）
+
+使用 CodeAgent CLI `1.2605.00` 和默认可用模型 `deepseek-v4-pro` 完成了唯一合成事实 `ZEBRA-7419` 的最小双组实验：
+
+- 开启 auto-memory 后，轨迹会话在指定 memory 目录生成 `MEMORY.md` 和具体记忆文件；
+- 在全新工作目录和新 session ID 中，Agent 能从相同 memory 目录召回 `ZEBRA-7419`；
+- 关闭 auto-memory 后，同样的轨迹处理调用不生成 memory 文件；
+- 关闭 auto-memory 的全新问题会话按提示返回 `UNKNOWN`；
+- 两组均使用 `--no-session-persistence`，轨迹和问题调用具有不同 session ID。
+
+验证还发现：
+
+1. auto-memory 会注入记忆索引，但读取具体记忆文件仍需要 `Read` 工具；查询不能使用 `--tools=` 全禁用工具，应限制为只读 `--tools=Read`；
+2. 将 `CODEAGENT3_CONFIG_DIR` 指向空的逐会话目录会丢失已配置模型和认证，实测回退至 `glm-5` 并收到 401；适配器应继承正常 CodeAgent 配置，通过临时工作目录、`--no-session-persistence` 和独立 memory 快照实现评测隔离。

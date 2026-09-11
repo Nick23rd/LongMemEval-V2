@@ -3,6 +3,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from memory_modules.memory import EndToEndMemoryAgent, MEMORY_TYPES, load_memory, save_memory
 from evaluation.memory_lifecycle import build_stateful_memory
 
@@ -28,7 +30,13 @@ def _trajectory(screenshot: Path, trajectory_id: str = "traj/one") -> dict[str, 
     }
 
 
-def _config(workspace: Path, trajectories_root: Path, *, resume_build: bool = False) -> dict[str, object]:
+def _config(
+    workspace: Path,
+    trajectories_root: Path,
+    *,
+    resume_build: bool = False,
+    experiment_mode: str = "baseline",
+) -> dict[str, object]:
     return {
         "workspace_dir": str(workspace),
         "trajectories_root_dir": str(trajectories_root),
@@ -40,7 +48,8 @@ def _config(workspace: Path, trajectories_root: Path, *, resume_build: bool = Fa
             "query_max_turns": 2,
             "ingest_max_attempts": 2,
             "query_max_attempts": 2,
-            "require_memory_write": True,
+            "experiment_mode": experiment_mode,
+            "require_memory_write": experiment_mode != "memory_off",
             "resume_build": resume_build,
             "extra_args": [],
         },
@@ -54,6 +63,16 @@ def test_codeagent_auto_memory_is_registered() -> None:
 def test_codeagent_auto_memory_supports_direct_answers() -> None:
     memory = object.__new__(CodeAgentAutoMemory)
     assert isinstance(memory, EndToEndMemoryAgent)
+
+
+def test_invalid_experiment_mode_is_rejected(tmp_path: Path) -> None:
+    config = _config(tmp_path / "workspace", tmp_path)
+    params = config["codeagent_auto_memory_params"]
+    assert isinstance(params, dict)
+    params["experiment_mode"] = "unknown"
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run"):
+        with pytest.raises(RuntimeError, match="experiment_mode"):
+            CodeAgentAutoMemory(config)
 
 
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
@@ -79,7 +98,8 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
             (memory_dir / "MEMORY.md").write_text("Locale is zh-CN.\n", encoding="utf-8")
             result_text = "Memory saved"
         else:
-            assert "--tools=" in command
+            assert "--tools=Read" in command
+            assert "dontAsk" in command
             assert not (cwd / "trajectory").exists()
             assert (cwd / "question.json").exists()
             result_text = "The remembered locale is zh-CN."
@@ -153,6 +173,69 @@ def test_failed_attempt_rolls_back_then_resume_skips_completed_trajectory(tmp_pa
         resumed = CodeAgentAutoMemory(_config(workspace, tmp_path, resume_build=True))
         resumed.insert(_trajectory(screenshot))
         assert attempts == 2
+
+
+def test_memory_off_still_ingests_but_keeps_memory_empty(tmp_path: Path) -> None:
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+    workspace = tmp_path / "workspace"
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "1.2.3\n", "")
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert env["CODEAGENT3_DISABLE_AUTO_MEMORY"] == "1"
+        cwd = Path(str(kwargs["cwd"]))
+        calls.append({"command": command, "cwd": cwd})
+        result_text = "trajectory processed" if (cwd / "trajectory").exists() else "\\boxed{UNKNOWN}"
+        payload = {"type": "result", "result": result_text}
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(
+            _config(workspace, tmp_path, experiment_mode="memory_off")
+        )
+        build_stateful_memory(memory, ["traj/one"], {"traj/one": _trajectory(screenshot)})
+        assert memory.inserted_trajectory_ids == ["traj/one"]
+        assert not list((workspace / "auto_memory").iterdir())
+        manifest = json.loads((workspace / "ingestion_manifest.json").read_text(encoding="utf-8"))
+        assert manifest["experiment_mode"] == "memory_off"
+        assert manifest["build_status"] == "complete_memory_off"
+
+        memory.set_query_context(query_invocation_id="memory-off/question")
+        answer = memory.answer("What was retained? Wrap it in \\boxed{}.")
+        assert answer["response_raw"] == "\\boxed{UNKNOWN}"
+
+    assert len(calls) == 2
+    assert (calls[0]["cwd"] / "trajectory").exists() is False
+    assert "historical work session" in calls[0]["command"][-1]
+    assert "directly" in calls[1]["command"][-1]
+
+
+def test_memory_off_rejects_unexpected_memory_write(tmp_path: Path) -> None:
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "1.2.3\n", "")
+        memory_dir = Path(kwargs["env"]["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"])
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        (memory_dir / "unexpected.md").write_text("leak", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, json.dumps({"type": "result", "result": "done"}), "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(
+            _config(tmp_path / "workspace", tmp_path, experiment_mode="memory_off")
+        )
+        with pytest.raises(RuntimeError, match="wrote auto-memory"):
+            memory.insert(_trajectory(screenshot))
+        manifest = json.loads(
+            (tmp_path / "workspace" / "ingestion_manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["build_status"] == "isolation_failed"
 
 
 def test_incomplete_saved_memory_is_rejected(tmp_path: Path) -> None:

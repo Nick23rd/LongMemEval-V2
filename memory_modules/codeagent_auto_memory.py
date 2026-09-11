@@ -21,6 +21,8 @@ DEFAULT_INGEST_MAX_TURNS = 30
 DEFAULT_QUERY_MAX_TURNS = 20
 DEFAULT_INGEST_MAX_ATTEMPTS = 1
 DEFAULT_QUERY_MAX_ATTEMPTS = 3
+DEFAULT_EXPERIMENT_MODE = "baseline"
+EXPERIMENT_MODES = {"memory_off", "baseline", "candidate"}
 
 INGEST_PROMPT = """This is a completed historical work session.
 
@@ -165,6 +167,12 @@ class CodeAgentAutoMemory(StatefulMemory):
         self.query_max_turns = int(params.get("query_max_turns", DEFAULT_QUERY_MAX_TURNS))
         self.ingest_max_attempts = int(params.get("ingest_max_attempts", DEFAULT_INGEST_MAX_ATTEMPTS))
         self.query_max_attempts = int(params.get("query_max_attempts", DEFAULT_QUERY_MAX_ATTEMPTS))
+        experiment_mode = params.get("experiment_mode", DEFAULT_EXPERIMENT_MODE)
+        require(
+            isinstance(experiment_mode, str) and experiment_mode in EXPERIMENT_MODES,
+            f"codeagent auto-memory experiment_mode must be one of {sorted(EXPERIMENT_MODES)}",
+        )
+        self.experiment_mode = experiment_mode
         self.require_memory_write = params.get("require_memory_write", False)
         self.resume_build = params.get("resume_build", False)
         extra_args = params.get("extra_args", [])
@@ -172,6 +180,10 @@ class CodeAgentAutoMemory(StatefulMemory):
         require(self.ingest_max_turns > 0 and self.query_max_turns > 0, "codeagent auto-memory turn limits must be positive")
         require(self.ingest_max_attempts > 0 and self.query_max_attempts > 0, "codeagent auto-memory attempt limits must be positive")
         require(isinstance(self.require_memory_write, bool), "codeagent auto-memory require_memory_write must be boolean")
+        require(
+            self.experiment_mode != "memory_off" or not self.require_memory_write,
+            "memory_off cannot require an auto-memory write",
+        )
         require(isinstance(self.resume_build, bool), "codeagent auto-memory resume_build must be boolean")
         require(isinstance(extra_args, list) and all(isinstance(item, str) and item for item in extra_args), "codeagent auto-memory extra_args must be a list of non-empty strings")
         self.extra_args = list(extra_args)
@@ -210,6 +222,7 @@ class CodeAgentAutoMemory(StatefulMemory):
             "query_max_turns": self.query_max_turns,
             "ingest_max_attempts": self.ingest_max_attempts,
             "query_max_attempts": self.query_max_attempts,
+            "experiment_mode": self.experiment_mode,
             "require_memory_write": self.require_memory_write,
             "resume_build": self.resume_build,
             "extra_args": list(self.extra_args),
@@ -266,18 +279,26 @@ class CodeAgentAutoMemory(StatefulMemory):
         if ingestion:
             command.extend(["--permission-mode", "acceptEdits", "--tools=Read,Write,Edit,Glob,Grep"])
         else:
-            command.append("--tools=")
+            # Native auto-memory injects an index, then asks the agent to read
+            # the selected memory file. Keep queries read-only rather than
+            # disabling every tool.
+            command.extend(["--permission-mode", "dontAsk", "--tools=Read"])
         if self.model is not None:
             command.extend(["--model", self.model])
         command.extend(self.extra_args)
         command.append(prompt)
         return command
 
-    def _environment(self, memory_dir: Path, session_dir: Path) -> dict[str, str]:
+    def _environment(self, memory_dir: Path) -> dict[str, str]:
         environment = dict(os.environ)
         environment["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"] = str(memory_dir.resolve())
-        environment["CODEAGENT3_DISABLE_AUTO_MEMORY"] = "0"
-        environment["CODEAGENT3_CONFIG_DIR"] = str((session_dir / "codeagent_config").resolve())
+        environment["CODEAGENT3_DISABLE_AUTO_MEMORY"] = (
+            "1" if self.experiment_mode == "memory_off" else "0"
+        )
+        # Inherit the configured CodeAgent config so its selected model and
+        # credentials remain available. Session isolation is provided by the
+        # temporary cwd plus --no-session-persistence; memory is independently
+        # redirected to the frozen per-call snapshot above.
         environment.pop("CODEAGENT3_SIMPLE", None)
         return environment
 
@@ -286,7 +307,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         started = time.time()
         timed_out = False
         try:
-            result = subprocess.run(command, cwd=session_dir, env=self._environment(memory_dir, session_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self.timeout_seconds, check=False)
+            result = subprocess.run(command, cwd=session_dir, env=self._environment(memory_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self.timeout_seconds, check=False)
             returncode, stdout, stderr = result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired as exc:
             timed_out = True
@@ -321,6 +342,8 @@ class CodeAgentAutoMemory(StatefulMemory):
         session_index = len(self.inserted_trajectory_ids)
         main_memory = self.workspace_dir / "auto_memory"
         before = _memory_snapshot(main_memory)
+        if self.experiment_mode == "memory_off":
+            require(not before, "memory_off requires an empty persistent memory directory")
         final_record: dict[str, Any] | None = None
         for attempt in range(1, self.ingest_max_attempts + 1):
             audit_dir = self.workspace_dir / "ingestion_sessions" / f"{session_index:04d}_{_safe_name(prepared.trajectory_id)}" / f"attempt_{attempt:03d}"
@@ -334,22 +357,42 @@ class CodeAgentAutoMemory(StatefulMemory):
             after = _memory_snapshot(isolated_memory)
             changes = _snapshot_diff(before, after)
             changed = any(changes.values())
-            status = "success" if summary["returncode"] == 0 and changed else "empty_ingestion" if summary["returncode"] == 0 else "failed"
+            if summary["returncode"] != 0:
+                status = "failed"
+            elif self.experiment_mode == "memory_off" and changed:
+                status = "isolation_failed"
+            elif self.experiment_mode == "memory_off":
+                status = "success"
+            elif changed:
+                status = "success"
+            else:
+                status = "empty_ingestion"
             summary.update({"trajectory_id": prepared.trajectory_id, "trajectory_fingerprint": prepared.fingerprint, "attempt": attempt, "status": status, "memory_before_digest": _snapshot_digest(before), "memory_after_digest": _snapshot_digest(after), "memory_changes": changes})
             _write_json(session_dir / "summary.json", summary)
             audit_dir.parent.mkdir(parents=True, exist_ok=True)
             _copy_audit_files(session_dir, audit_dir)
-            if summary["returncode"] == 0:
+            if summary["returncode"] == 0 and self.experiment_mode != "memory_off":
                 _replace_tree(isolated_memory, main_memory)
             shutil.rmtree(isolated_root)
             self.ingestion_records.append(summary)
             final_record = summary
-            self._write_manifests(status="building" if summary["returncode"] == 0 else "partial_failed")
-            if summary["returncode"] == 0:
+            manifest_status = (
+                "isolation_failed"
+                if status == "isolation_failed"
+                else "building"
+                if summary["returncode"] == 0
+                else "partial_failed"
+            )
+            self._write_manifests(status=manifest_status)
+            if status in {"success", "empty_ingestion", "isolation_failed"}:
                 break
         require(final_record is not None, "CodeAgent ingestion produced no attempt record")
         if final_record["status"] == "failed":
             raise RuntimeError(f"CodeAgent ingestion failed for trajectory {prepared.trajectory_id} after {self.ingest_max_attempts} attempts")
+        if final_record["status"] == "isolation_failed":
+            raise RuntimeError(
+                f"CodeAgent wrote auto-memory while experiment_mode=memory_off for trajectory {prepared.trajectory_id}"
+            )
         if self.require_memory_write and final_record["status"] == "empty_ingestion":
             raise RuntimeError(f"CodeAgent made no auto-memory change for trajectory {prepared.trajectory_id}")
         self.inserted_trajectory_ids.append(prepared.trajectory_id)
@@ -358,7 +401,7 @@ class CodeAgentAutoMemory(StatefulMemory):
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
-        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
         usage_totals: dict[str, float] = {}
         for record in self.ingestion_records:
             usage = record.get("usage")
@@ -371,7 +414,14 @@ class CodeAgentAutoMemory(StatefulMemory):
         _write_json(self.workspace_dir / "ingestion_metrics.json", {"trajectory_count": len(self.inserted_trajectory_ids), "attempt_count": len(self.ingestion_records), "success_count": sum(item["status"] == "success" for item in final_records), "empty_ingestion_count": sum(item["status"] == "empty_ingestion" for item in final_records), "failed_attempt_count": sum(item["status"] == "failed" for item in self.ingestion_records), "total_duration_seconds": sum(float(item.get("duration_seconds", 0)) for item in self.ingestion_records), "usage_totals": usage_totals, "memory_file_count": len(snapshot), "memory_total_bytes": sum(item["size"] for item in snapshot.values()), "memory_snapshot": snapshot})
 
     def finalize_build(self) -> None:
-        status = "complete_with_empty_ingestions" if any(item.get("status") == "empty_ingestion" for item in self.ingestion_records) else "complete"
+        if self.experiment_mode == "memory_off":
+            require(
+                self.workspace_dir is not None and not _memory_snapshot(self.workspace_dir / "auto_memory"),
+                "memory_off build produced persistent auto-memory",
+            )
+            status = "complete_memory_off"
+        else:
+            status = "complete_with_empty_ingestions" if any(item.get("status") == "empty_ingestion" for item in self.ingestion_records) else "complete"
         self._write_manifests(status=status)
 
     def build_metrics(self) -> dict[str, object] | None:
@@ -454,6 +504,8 @@ class CodeAgentAutoMemory(StatefulMemory):
             result = summary.get("result")
             if summary["returncode"] == 0 and isinstance(result, str) and result.strip():
                 require(_memory_snapshot(source_memory) == frozen_snapshot, "Query mutated frozen main auto memory")
+                if self.experiment_mode == "memory_off":
+                    require(not summary["snapshot_after"], "CodeAgent wrote auto-memory during a memory_off query")
                 return summary
         detail = last_summary or {}
         raise RuntimeError(f"CodeAgent auto-memory query failed after {self.query_max_attempts} attempts: returncode={detail.get('returncode')} timed_out={detail.get('timed_out')}")
@@ -474,7 +526,11 @@ class CodeAgentAutoMemory(StatefulMemory):
             shutil.rmtree(destination)
         shutil.copytree(source_memory, destination)
         manifest = json.loads((input_dir / "ingestion_manifest.json").read_text(encoding="utf-8"))
-        require(manifest.get("build_status") in {"complete", "complete_with_empty_ingestions"}, f"Saved auto-memory build is not complete: {manifest.get('build_status')}")
+        require(
+            manifest.get("experiment_mode", DEFAULT_EXPERIMENT_MODE) == self.experiment_mode,
+            "Saved auto-memory experiment mode does not match requested mode",
+        )
+        require(manifest.get("build_status") in {"complete", "complete_with_empty_ingestions", "complete_memory_off"}, f"Saved auto-memory build is not complete: {manifest.get('build_status')}")
         self.inserted_trajectory_ids = list(manifest.get("trajectory_ids", []))
         self.ingestion_records = list(manifest.get("records", []))
         self.ingestion_plan = dict(manifest.get("ingestion_plan", self.ingestion_plan))
