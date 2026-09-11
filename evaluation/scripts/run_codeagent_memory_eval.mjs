@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -164,6 +164,27 @@ function ensureOutput(options) {
   if (!options["data-root"] || !options["output-root"]) fail("--data-root and --output-root are required");
   const output = resolve(options["output-root"]);
   if (existsSync(output) && !options.resume) fail(`output root exists; use --resume to continue: ${output}`);
+  if (!dryRun) {
+    const manifestPath = join(output, "runner_config.json");
+    const ignored = new Set(["resume", "dry-run", "confirm-full-run", "confirm-full-haystack"]);
+    const normalized = Object.fromEntries(Object.entries(options)
+      .filter(([key]) => !ignored.has(key))
+      .map(([key, value]) => [key, key === "data-root" || key === "output-root" ? resolve(value) : value])
+      .sort(([left], [right]) => left.localeCompare(right)));
+    if (options.resume) {
+      if (!existsSync(manifestPath)) fail(`cannot resume without runner_config.json: ${output}`);
+      const saved = JSON.parse(readFileSync(manifestPath, "utf8"));
+      if (JSON.stringify(saved.config) !== JSON.stringify(normalized)) {
+        fail("resume configuration differs from runner_config.json; use the original arguments or a new output root");
+      }
+    } else {
+      mkdirSync(output, { recursive: true });
+      writeFileSync(manifestPath, `${JSON.stringify({
+        schema_version: 1, runner: "run_codeagent_memory_eval.mjs",
+        node_version: process.version, platform: process.platform, config: normalized,
+      }, null, 2)}\n`, "utf8");
+    }
+  }
   return output;
 }
 

@@ -87,19 +87,12 @@ evaluation and a 2×2 write-versus-recall attribution design for CodeAgent's
 native auto-memory. A fixed 10-question calibration run produces JSON, JSONL,
 Markdown, and standalone HTML reports:
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_attribution_calibration.ps1 `
-  -DataRoot .\data\longmemeval-v2 `
-  -OutputRoot .\runs\attribution_calibration_001 `
-  -ConfirmFullHaystack `
-  -WriterALauncherCommand D:\builds\before\codeagentcli.exe `
-  -RecallALauncherCommand D:\builds\before\codeagentcli.exe `
-  -WriterBLauncherCommand D:\builds\after\codeagentcli.exe `
-  -RecallBLauncherCommand D:\builds\after\codeagentcli.exe
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset calibration --data-root data/longmemeval-v2 --output-root runs/attribution_calibration_001 --confirm-full-haystack --writer-a-launcher '["/builds/before/codeagentcli"]' --recall-a-launcher '["/builds/before/codeagentcli"]' --writer-b-launcher '["/builds/after/codeagentcli"]' --recall-b-launcher '["/builds/after/codeagentcli"]'
 ```
 
 See the [evaluation-environment runbook](docs/codeagent_memory_evaluation_environment_runbook.zh-CN.md)
-for source launchers, prompt-only experiments, recovery with `-Resume`, report
+for Node/Bun execution, source launchers, prompt-only experiments, recovery with `--resume`, report
 interpretation, and the calibration acceptance criteria.
 
 ## Setup: Environment

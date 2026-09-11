@@ -15,8 +15,9 @@
 
 在仓库根目录运行：
 
-```powershell
-& .\.venv\Scripts\python.exe -m pytest -q
+```bash
+python -m pytest -q
+node --version
 codeagentcli --version
 codeagentcli -p --output-format json --no-session-persistence --max-turns 1 "Reply OK only."
 ```
@@ -31,59 +32,42 @@ data/longmemeval-v2/haystacks/lme_v2_small.json
 
 ## 3. 修改前/后 EXE 的推荐命令
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_attribution_calibration.ps1 `
-  -DataRoot .\data\longmemeval-v2 `
-  -OutputRoot .\runs\attribution_calibration_001 `
-  -ConfirmFullHaystack `
-  -Python .\.venv\Scripts\python.exe `
-  -CodeAgentModel deepseek-v4-pro `
-  -IngestMaxTurns 60 `
-  -QueryMaxTurns 20 `
-  -IngestMaxAttempts 2 `
-  -QueryMaxAttempts 2 `
-  -WriterALauncherCommand D:\builds\before\codeagentcli.exe `
-  -RecallALauncherCommand D:\builds\before\codeagentcli.exe `
-  -WriterBLauncherCommand D:\builds\after\codeagentcli.exe `
-  -RecallBLauncherCommand D:\builds\after\codeagentcli.exe
+Node.js 与 Bun 使用相同参数。以下命令在 Bash 和 PowerShell 中都可直接运行：
+
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset calibration --data-root data/longmemeval-v2 --output-root runs/attribution_calibration_001 --confirm-full-haystack --model deepseek-v4-pro --ingest-max-turns 60 --query-max-turns 20 --ingest-max-attempts 2 --query-max-attempts 2 --writer-a-launcher '["/builds/before/codeagentcli"]' --recall-a-launcher '["/builds/before/codeagentcli"]' --writer-b-launcher '["/builds/after/codeagentcli"]' --recall-b-launcher '["/builds/after/codeagentcli"]'
 ```
 
 如果使用 CodeAgent 默认 DeepSeek 配置，可省略 `-CodeAgentModel`。
 
 源码启动示例：
 
-```powershell
--WriterBLauncherCommand bun,D:\src\CodeAgent\src\cli.ts `
--RecallBLauncherCommand bun,D:\src\CodeAgent\src\cli.ts
+```bash
+--writer-b-launcher '["bun","/src/CodeAgent/src/cli.ts"]' --recall-b-launcher '["bun","/src/CodeAgent/src/cli.ts"]'
 ```
 
 ## 4. 单变量实验
 
 只评测写入提示词时，A/B 使用同一个 CLI 和召回配置，只改变：
 
-```powershell
--WriterAIngestPromptFile .\prompts\ingest_before.txt `
--WriterBIngestPromptFile .\prompts\ingest_after.txt
+```bash
+--writer-a-ingest-prompt prompts/ingest_before.txt --writer-b-ingest-prompt prompts/ingest_after.txt
 ```
 
 只评测召回提示词时，写入端保持一致，只改变：
 
-```powershell
--RecallAQueryPromptFile .\prompts\recall_before.txt `
--RecallBQueryPromptFile .\prompts\recall_after.txt
+```bash
+--recall-a-query-prompt prompts/recall_before.txt --recall-b-query-prompt prompts/recall_after.txt
 ```
 
-如果修改影响最终回答阶段，则改用 `RecallADirectAnswerPromptFile` 和 `RecallBDirectAnswerPromptFile`。一次实验尽量只改变一个因素。
+如果修改影响最终回答阶段，则改用 `--recall-a-answer-prompt` 和 `--recall-b-answer-prompt`。一次实验尽量只改变一个因素。
 
 ## 5. 失败后恢复
 
-原命令增加 `-Resume`，并保持所有 A/B 参数不变：
+原命令增加 `--resume`，并保持所有 A/B 参数不变：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_attribution_calibration.ps1 `
-  ...原有参数... `
-  -ConfirmFullHaystack `
-  -Resume
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset calibration ...原有参数... --confirm-full-haystack --resume
 ```
 
 恢复逻辑会跳过已有的完整 memory state 和完整查询结果，从 ingestion checkpoint 继续失败轨迹。新尝试使用连续的 attempt 编号，不覆盖旧日志。
@@ -115,4 +99,14 @@ HTML 中应能看到：
 - 写入无未解释失败，查询超时/失败为零；
 - 人工复核所有 improved 和 regressed 题，变化能由回答内容解释；
 - 若 A/B 实际相同，归因差值应只反映模型随机性，不应出现配置串用；
-- 确认总 Token、费用和耗时可接受后，才运行 `run_codeagent_memory_attribution_small.ps1`。
+- 确认总 Token、费用和耗时可接受后，再运行 `node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset small ... --confirm-full-run`。
+
+## 8. 跨平台约定
+
+- 正式入口只依赖 Node.js/Bun 标准库，不需要 npm install。
+- 脚本自动选择 `.venv/bin/python`（Linux/macOS）或 `.venv/Scripts/python.exe`（Windows），也可用 `--python` 覆盖。
+- launcher 使用 JSON argv 数组，子进程以 `shell=false` 启动，路径中的空格不会被再次拆词。
+- 所有输出路径由 Node `path.resolve` 规范化；Python 侧使用 `pathlib`、`tempfile` 和参数数组。
+- `SIGINT`/`SIGTERM` 会转发给当前 Python 子进程，退出码非零立即停止后续阶段。
+- 可先加 `--dry-run` 查看所有子命令，不创建目录、不调用模型。
+- 也可把命令首个单词从 `node` 换成 `bun`，其余参数不变。

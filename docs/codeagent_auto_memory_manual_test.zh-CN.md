@@ -92,14 +92,10 @@ Test-Path "$env:DATA_ROOT\trajectories.jsonl"
 
 如果只需要验证三组工程链路，可使用 `--haystack-limit` 截取每个 haystack 的前 N 条轨迹。该参数会改变正式评测数据，产物中的 `runtime_inputs/data_selection.json` 会标记 `structural_smoke_only: true`，因此结果不得作为 benchmark 分数。
 
-仓库提供三组结构冒烟脚本：
+仓库提供 Node/Bun 通用的三组结构冒烟入口：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_regression.ps1 `
-  -DataRoot $env:DATA_ROOT `
-  -OutputRoot '.\runs\codeagent_memory_regression_smoke_01' `
-  -HaystackLimit 1 `
-  -Python $Python
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_memory_regression_smoke_01 --haystack-limit 1
 ```
 
 脚本依次执行：
@@ -111,31 +107,18 @@ memory_off 构建与直接回答
 → 生成三组配对报告
 ```
 
-默认选择真实题目 `05cce9b3`。baseline 和 candidate 默认使用同一 binary，仅用于验证流程；正式回归必须通过 `-BaselineBinary`、`-CandidateBinary`、版本标签或提示词文件传入真正的修改前后版本。
+默认选择真实题目 `05cce9b3`。baseline 和 candidate 默认使用同一 binary，仅用于验证流程；正式回归必须通过 launcher、版本标签或提示词文件传入真正的修改前后版本。
 
 对比两个打包后的 CLI：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_regression.ps1 `
-  -DataRoot $env:DATA_ROOT `
-  -OutputRoot '.\runs\packed_cli_comparison_01' `
-  -BaselineBinary 'D:\builds\before\codeagentcli.exe' `
-  -CandidateBinary 'D:\builds\after\codeagentcli.exe' `
-  -BaselineVersionLabel 'before-change' `
-  -CandidateVersionLabel 'after-change'
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke --data-root data/longmemeval-v2 --output-root runs/packed_cli_comparison_01 --memory-off-launcher '["D:/builds/before/codeagentcli.exe"]' --baseline-launcher '["D:/builds/before/codeagentcli.exe"]' --candidate-launcher '["D:/builds/after/codeagentcli.exe"]' --baseline-version-label before-change --candidate-version-label after-change
 ```
 
 直接从两个源码仓启动时，传入完整 argv 数组。源码入口必须使用绝对路径：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_regression.ps1 `
-  -DataRoot $env:DATA_ROOT `
-  -OutputRoot '.\runs\source_comparison_01' `
-  -MemoryOffLauncherCommand @('bun', 'D:\CodeAgent-before\src\cli.ts') `
-  -BaselineLauncherCommand @('bun', 'D:\CodeAgent-before\src\cli.ts') `
-  -CandidateLauncherCommand @('bun', 'D:\CodeAgent-after\src\cli.ts') `
-  -BaselineVersionLabel 'before-commit-abc123' `
-  -CandidateVersionLabel 'after-commit-def456'
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke --data-root data/longmemeval-v2 --output-root runs/source_comparison_01 --memory-off-launcher '["bun","D:/CodeAgent-before/src/cli.ts"]' --baseline-launcher '["bun","D:/CodeAgent-before/src/cli.ts"]' --candidate-launcher '["bun","D:/CodeAgent-after/src/cli.ts"]' --baseline-version-label before-commit-abc123 --candidate-version-label after-commit-def456
 ```
 
 源码启动不会把源码仓作为 Agent 工作目录。评测器仍在逐次创建的临时 session 目录中运行进程，只把绝对入口路径作为启动参数。
@@ -153,34 +136,16 @@ memory_off 构建与直接回答
 
 ## 5.1 正式 small tier 三组回归
 
-正式入口不会传入 `--haystack-limit`，会使用所选领域完整的 small haystack，并默认评测该领域全部问题。运行成本很高，必须显式提供 `-ConfirmFullRun`：
+正式入口不会传入 `--haystack-limit`，会使用所选领域完整的 small haystack，并默认评测该领域全部问题。运行成本很高，必须显式提供 `--confirm-full-run`：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_regression_small.ps1 `
-  -DataRoot $env:DATA_ROOT `
-  -OutputRoot '.\runs\codeagent_small_web_01' `
-  -Domain web `
-  -Python $Python `
-  -MemoryOffBinary 'D:\builds\before\codeagentcli.exe' `
-  -BaselineBinary 'D:\builds\before\codeagentcli.exe' `
-  -CandidateBinary 'D:\builds\after\codeagentcli.exe' `
-  -BaselineVersionLabel 'before-change' `
-  -CandidateVersionLabel 'after-change' `
-  -ConfirmFullRun
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset small --data-root data/longmemeval-v2 --output-root runs/codeagent_small_web_01 --domain web --memory-off-launcher '["D:/builds/before/codeagentcli.exe"]' --baseline-launcher '["D:/builds/before/codeagentcli.exe"]' --candidate-launcher '["D:/builds/after/codeagentcli.exe"]' --baseline-version-label before-change --candidate-version-label after-change --confirm-full-run
 ```
 
 Enterprise 领域应使用新的输出目录单独运行：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_regression_small.ps1 `
-  -DataRoot $env:DATA_ROOT `
-  -OutputRoot '.\runs\codeagent_small_enterprise_01' `
-  -Domain enterprise `
-  -Python $Python `
-  -BaselineBinary 'D:\builds\before\codeagentcli.exe' `
-  -CandidateBinary 'D:\builds\after\codeagentcli.exe' `
-  -MemoryOffBinary 'D:\builds\before\codeagentcli.exe' `
-  -ConfirmFullRun
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset small --data-root data/longmemeval-v2 --output-root runs/codeagent_small_enterprise_01 --domain enterprise --memory-off-launcher '["D:/builds/before/codeagentcli.exe"]' --baseline-launcher '["D:/builds/before/codeagentcli.exe"]' --candidate-launcher '["D:/builds/after/codeagentcli.exe"]' --confirm-full-run
 ```
 
 正式报告只能来自未设置 `haystack_limit` 的运行。可以检查三组的：
@@ -390,35 +355,20 @@ Move-Item runs\codeagent_auto_memory_smoke_build runs\codeagent_auto_memory_smok
 
 先用一题和截断 haystack 验证结构：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_attribution.ps1 `
-  -DataRoot .\data `
-  -OutputRoot .\runs\codeagent_attribution_smoke `
-  -QuestionIds 05cce9b3 `
-  -HaystackLimit 3 `
-  -WriterALauncherCommand codeagentcli `
-  -RecallALauncherCommand codeagentcli `
-  -WriterBLauncherCommand D:\path\to\baseline-or-candidate\codeagentcli.exe `
-  -RecallBLauncherCommand D:\path\to\baseline-or-candidate\codeagentcli.exe
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_attribution_smoke --question-id 05cce9b3 --haystack-limit 3 --writer-a-launcher '["codeagentcli"]' --recall-a-launcher '["codeagentcli"]' --writer-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]' --recall-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]'
 ```
 
 源码入口可传多段 argv，例如：
 
-```powershell
--WriterBLauncherCommand bun,D:\src\CodeAgent\src\cli.ts
+```bash
+--writer-b-launcher '["bun","D:/src/CodeAgent/src/cli.ts"]'
 ```
 
 结构验证后运行正式 small 全量归因：
 
-```powershell
-& .\evaluation\scripts\run_codeagent_memory_attribution_small.ps1 `
-  -DataRoot .\data `
-  -OutputRoot .\runs\codeagent_attribution_small `
-  -ConfirmFullRun `
-  -WriterALauncherCommand codeagentcli `
-  -RecallALauncherCommand codeagentcli `
-  -WriterBLauncherCommand D:\path\to\candidate\codeagentcli.exe `
-  -RecallBLauncherCommand D:\path\to\candidate\codeagentcli.exe
+```bash
+node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset small --data-root data/longmemeval-v2 --output-root runs/codeagent_attribution_small --confirm-full-run --writer-a-launcher '["codeagentcli"]' --recall-a-launcher '["codeagentcli"]' --writer-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]' --recall-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]'
 ```
 
-结果位于 `attribution/report.md`、`attribution/attribution.json` 和 `attribution/per_question_attribution.jsonl`。若只修改写入提示词，保持 A/B launcher 相同并分别传 `WriterAIngestPromptFile`、`WriterBIngestPromptFile`；若只修改召回提示词，使用 `RecallAQueryPromptFile`、`RecallBQueryPromptFile` 或对应 direct-answer prompt 参数。
+结果位于 `attribution/report.html`、`attribution/report.md`、`attribution/attribution.json` 和 `attribution/per_question_attribution.jsonl`。只修改提示词时使用 `--writer-a-ingest-prompt`、`--writer-b-ingest-prompt`、`--recall-a-query-prompt`、`--recall-b-query-prompt` 或对应 answer prompt 参数。

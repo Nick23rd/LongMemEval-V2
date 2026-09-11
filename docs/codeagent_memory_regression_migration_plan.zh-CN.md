@@ -130,7 +130,7 @@
 ## 10. Phase 8：脚本与文档
 
 - [x] 增加可通过 question IDs 和 `--haystack-limit` 控制成本的开发结构冒烟配置。
-- [x] 增加 small tier 三组完整回归脚本，要求显式 `-ConfirmFullRun` 且不截断 haystack。
+- [x] 增加跨平台 small tier 三组完整回归入口，要求显式 `--confirm-full-run` 且不截断 haystack。
 - [ ] 增加 medium tier 发布验证脚本。
 - [x] 支持分别构建和加载写入 A/B memory state，并交叉运行召回 A/B。
 - [x] 更新手动测试文档。
@@ -199,11 +199,12 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | Phase 4 | 已完成 | 支持版本标签及三类提示词覆盖；保存正文、SHA-256、binary/version 和 memory snapshot；加载时校验兼容性 |
 | 2026-09-11 | Phase 5 | 已完成 | 新增三组配对对比器，输出 comparison.json、逐题 diff 和 Markdown 报告；覆盖不匹配输入测试 |
 | 2026-09-11 | Phase 8 | 部分完成 | 新增 `--haystack-limit` 和 PowerShell 三组冒烟脚本；真实题 `05cce9b3` 完成构建、直接回答和比较闭环；memory_off 为零记忆文件 |
-| 2026-09-11 | Phase 8 | small 入口完成 | 新增正式 `run_codeagent_memory_regression_small.ps1`；按领域运行全部题目和完整 small haystack，并要求显式成本确认 |
+| 2026-09-11 | Phase 8 | small 入口完成 | 正式跨平台 JS 入口按领域运行全部题目和完整 small haystack，并要求显式成本确认 |
 | 2026-09-11 | Phase 6 | 已完成 | 分离写入与查询 launcher；新增 AA/AB/BA/BB 四象限入口和独立归因报告，计算条件写入效应、条件召回效应及交互效应 |
 | 2026-09-11 | Phase 6 | 真实冒烟通过 | `05cce9b3`、每个写入组 1 条轨迹完成两次独立构建和四次交叉查询，产物为 `runs/codeagent_memory_attribution_smoke_20260911_03/attribution/report.md`；A/B 使用同一 CLI，因此四项差值均为零，符合预期 |
 | 2026-09-11 | Phase 6 | 稳定性发现 | 3 条轨迹冒烟的第 2 条在 DeepSeek 上达到 30 turns 后失败并被标记 `partial_failed`；正式 small 前需提高 turn 上限或收紧摄取提示词 |
-| 2026-09-11 | 测评环境准备 | 已完成 | 归因入口支持 turn、重试、timeout 和 `-Resume`；新增固定分层 10 题完整 small haystack 校准入口，HTML 汇总版本、提示词哈希、Token、费用、耗时及失败审计 |
+| 2026-09-11 | 测评环境准备 | 已完成 | 归因入口支持 turn、重试、timeout 和 `--resume`；新增固定分层 10 题完整 small haystack 校准入口，HTML 汇总版本、提示词哈希、Token、费用、耗时及失败审计 |
+| 2026-09-11 | 跨平台入口 | 已完成 | 使用无第三方依赖的 `run_codeagent_memory_eval.mjs` 统一 regression/attribution、smoke/calibration/small；Node 与 Bun 均通过解析，自动适配 Windows/Linux Python 路径并提供 `--dry-run` |
 | 2026-09-11 | 基础设施修复 | 已完成 | Windows 临时目录与数据位于不同盘符时，相对截图链接安全回退为文件复制 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。
