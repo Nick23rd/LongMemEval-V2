@@ -11,7 +11,7 @@
 
 任务状态约定：`[ ]` 未开始，`[-]` 进行中，`[x]` 已完成，`[!]` 受阻。
 
-当前总体状态：**Phase 0～4 已完成；下一阶段为三组回归对比器**。
+当前总体状态：**Phase 0～5 已完成；下一阶段可进行真实数据冒烟和写入/召回归因扩展**。
 
 ## 2. Phase 0：确认真实 CodeAgent 行为
 
@@ -91,16 +91,16 @@
 
 建议新增 `evaluation/compare_memory_regression.py`。
 
-- [ ] 接受三组 `per_question.jsonl`。
-- [ ] 校验 question ID 完全一致且无重复。
-- [ ] 校验 tier、领域、评分配置和关键参数可比较。
-- [ ] 按 question ID 配对，不依赖行顺序。
-- [ ] 计算三组总体准确率。
-- [ ] 计算 accuracy delta、improved、regressed、both correct/wrong。
-- [ ] 计算净改进数、净改进率和两版 memory gain。
-- [ ] 输出各能力分类结果。
-- [ ] 输出逐题 JSONL diff、JSON 汇总和 Markdown 报告。
-- [ ] 增加输入不匹配和缺题测试。
+- [x] 接受三组 `per_question.jsonl` 或对应运行目录。
+- [x] 校验 question ID 完全一致且无重复。
+- [x] 校验题目、分类、评分配置、标准答案和 haystack 可比较。
+- [x] 按 question ID 配对，不依赖行顺序。
+- [x] 计算三组总体准确率。
+- [x] 计算 accuracy delta、improved、regressed、both correct/wrong。
+- [x] 计算净改进数、净改进率和两版 memory gain。
+- [x] 输出各能力分类结果。
+- [x] 输出逐题 JSONL diff、JSON 汇总和 Markdown 报告。
+- [x] 增加模式错误、输入不匹配和缺题测试。
 
 验收：报告直接列出改进题和退化题；汇总能从逐题 diff 独立重算。
 
@@ -193,5 +193,6 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | Phase 2 | 核心完成 | 新增三种 experiment mode；memory_off 仍摄取轨迹并强制空记忆，意外写入标记 isolation_failed；22 tests、8 subtests 通过 |
 | 2026-09-11 | Phase 3 | 已完成 | harness 按 capability 分流；CodeAgent 原始回答直接评分且纯端到端运行不创建 reader；新增直接路径测试 |
 | 2026-09-11 | Phase 4 | 已完成 | 支持版本标签及三类提示词覆盖；保存正文、SHA-256、binary/version 和 memory snapshot；加载时校验兼容性 |
+| 2026-09-11 | Phase 5 | 已完成 | 新增三组配对对比器，输出 comparison.json、逐题 diff 和 Markdown 报告；覆盖不匹配输入测试 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。
