@@ -374,3 +374,51 @@ Move-Item runs\codeagent_auto_memory_smoke_build runs\codeagent_auto_memory_smok
 ```
 
 这只影响单元测试命令，不影响 backend 本身。
+
+## 写入策略与召回算法独立归因
+
+归因实验使用四个配对单元：
+
+| 单元 | 冻结记忆 | 查询/召回 |
+|---|---|---|
+| AA | 写入版本 A | 召回版本 A |
+| AB | 写入版本 A | 召回版本 B |
+| BA | 写入版本 B | 召回版本 A |
+| BB | 写入版本 B | 召回版本 B |
+
+其中 `BA-AA`、`BB-AB` 是在不同召回端下的写入效果，`AB-AA`、`BB-BA` 是在不同冻结记忆上的召回效果，`BB-BA-AB+AA` 是交互效应。该诊断报告不替代三组端到端回归报告。
+
+先用一题和截断 haystack 验证结构：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_attribution.ps1 `
+  -DataRoot .\data `
+  -OutputRoot .\runs\codeagent_attribution_smoke `
+  -QuestionIds 05cce9b3 `
+  -HaystackLimit 3 `
+  -WriterALauncherCommand codeagentcli `
+  -RecallALauncherCommand codeagentcli `
+  -WriterBLauncherCommand D:\path\to\baseline-or-candidate\codeagentcli.exe `
+  -RecallBLauncherCommand D:\path\to\baseline-or-candidate\codeagentcli.exe
+```
+
+源码入口可传多段 argv，例如：
+
+```powershell
+-WriterBLauncherCommand bun,D:\src\CodeAgent\src\cli.ts
+```
+
+结构验证后运行正式 small 全量归因：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_attribution_small.ps1 `
+  -DataRoot .\data `
+  -OutputRoot .\runs\codeagent_attribution_small `
+  -ConfirmFullRun `
+  -WriterALauncherCommand codeagentcli `
+  -RecallALauncherCommand codeagentcli `
+  -WriterBLauncherCommand D:\path\to\candidate\codeagentcli.exe `
+  -RecallBLauncherCommand D:\path\to\candidate\codeagentcli.exe
+```
+
+结果位于 `attribution/report.md`、`attribution/attribution.json` 和 `attribution/per_question_attribution.jsonl`。若只修改写入提示词，保持 A/B launcher 相同并分别传 `WriterAIngestPromptFile`、`WriterBIngestPromptFile`；若只修改召回提示词，使用 `RecallAQueryPromptFile`、`RecallBQueryPromptFile` 或对应 direct-answer prompt 参数。
