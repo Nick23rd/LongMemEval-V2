@@ -11,7 +11,7 @@
 
 任务状态约定：`[ ]` 未开始，`[-]` 进行中，`[x]` 已完成，`[!]` 受阻。
 
-当前总体状态：**Phase 0、Phase 1 已完成；Phase 2 的实验模式核心逻辑已完成，版本/提示词溯源仍待 Phase 4**。
+当前总体状态：**Phase 0～3 的核心路径已完成；下一阶段为版本与提示词溯源**。
 
 ## 2. Phase 0：确认真实 CodeAgent 行为
 
@@ -62,16 +62,16 @@
 
 预计涉及 `evaluation/harness.py`、`evaluation/qa_eval_metrics.py` 和相关测试。
 
-- [ ] 根据 capability 区分检索路径与直接回答路径。
-- [ ] 端到端路径跳过 memory-context 拼接。
-- [ ] 端到端路径不调用 `generate_all_reader_outputs()`。
-- [ ] 将 `answer()` 的 `response_raw` 直接交给已有解析和评分函数。
-- [ ] 保留原始回答、解析答案、UNKNOWN 和 usage。
-- [ ] 调整 `prompt_rows.jsonl`，避免把答案误记成 memory context。
-- [ ] 在逐题结果中记录执行路径和实验模式。
-- [ ] 分别统计构建和回答的 token/延迟。
-- [ ] 统一处理查询失败、空回答和超时。
-- [ ] 保持旧检索型路径兼容。
+- [x] 根据 capability 区分检索路径与直接回答路径。
+- [x] 端到端路径跳过 memory-context 拼接。
+- [x] 纯端到端运行不创建或调用外部 reader。
+- [x] 将 `answer()` 的 `response_raw` 直接交给已有解析和评分函数。
+- [x] 保留原始回答、解析答案、UNKNOWN 和规范化 usage。
+- [x] 调整 `prompt_rows.jsonl`，直接答案不再伪装成 memory context。
+- [x] 在逐题结果中记录执行路径和实验模式。
+- [x] 使用现有 memory_build 与 memory_query 指标分别统计构建和直接回答成本。
+- [x] 复用查询重试、空回答和超时错误处理。
+- [x] 保持旧检索型路径兼容。
 
 验收：端到端运行不会创建外部 reader client；评分对象可证明是 CodeAgent 原始回答。
 
@@ -191,5 +191,6 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | Phase 0 | 已完成 | CLI 1.2605.00 + deepseek-v4-pro 完成 `ZEBRA-7419` 双组实验：enabled 跨会话召回，memory_off 返回 UNKNOWN 且零 memory 文件；确认查询需要 Read |
 | 2026-09-11 | Phase 1 | 已完成 | 新增 `AgentAnswer`、`EndToEndMemoryAgent` 和 `CodeAgentAutoMemory.answer()`；12 tests、8 subtests 通过 |
 | 2026-09-11 | Phase 2 | 核心完成 | 新增三种 experiment mode；memory_off 仍摄取轨迹并强制空记忆，意外写入标记 isolation_failed；22 tests、8 subtests 通过 |
+| 2026-09-11 | Phase 3 | 已完成 | harness 按 capability 分流；CodeAgent 原始回答直接评分且纯端到端运行不创建 reader；新增直接路径测试 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。

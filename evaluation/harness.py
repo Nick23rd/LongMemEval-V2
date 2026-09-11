@@ -26,6 +26,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from memory_modules.memory import (  # noqa: E402
+    AgentAnswer,
+    EndToEndMemoryAgent,
     Memory,
     MemoryContextItem,
     StatefulMemory,
@@ -577,21 +579,39 @@ def build_prompt_row(
     )
     try:
         query_started_at = time.perf_counter()
-        memory_context = validate_memory_context_items(
-            memory.query(
+        if isinstance(memory, EndToEndMemoryAgent):
+            direct_answer = memory.answer(
                 item["question_text"],
-                query_image=item["question_image"],
-            ),
-            question_id=qid,
-        )
+                question_image=item["question_image"],
+            )
+            require(
+                isinstance(direct_answer, dict)
+                and isinstance(direct_answer.get("response_raw"), str)
+                and direct_answer["response_raw"].strip(),
+                f"memory.answer must return a non-empty response_raw for {qid}",
+            )
+            memory_context: list[MemoryContextItem] = []
+        else:
+            direct_answer = None
+            memory_context = validate_memory_context_items(
+                memory.query(
+                    item["question_text"],
+                    query_image=item["question_image"],
+                ),
+                question_id=qid,
+            )
         memory_query_duration_seconds = time.perf_counter() - query_started_at
-        post_query_started_at = time.perf_counter()
-        memory_post_query_metadata = memory.post_query_hook(
-            query=item["question_text"],
-            query_image=item["question_image"],
-            memory_context=memory_context,
-        )
-        memory_post_query_duration_seconds = time.perf_counter() - post_query_started_at
+        if direct_answer is None:
+            post_query_started_at = time.perf_counter()
+            memory_post_query_metadata = memory.post_query_hook(
+                query=item["question_text"],
+                query_image=item["question_image"],
+                memory_context=memory_context,
+            )
+            memory_post_query_duration_seconds = time.perf_counter() - post_query_started_at
+        else:
+            memory_post_query_metadata = None
+            memory_post_query_duration_seconds = 0.0
     finally:
         memory.clear_query_context()
     memory_context, original_memory_token_count, truncated_memory_token_count = truncate_memory_context(
@@ -599,12 +619,18 @@ def build_prompt_row(
         max_tokens=memory_context_max_tokens,
         question_id=qid,
     )
-    messages, messages_for_log = build_messages(
-        system_prompt=system_prompt,
-        question_text=item["question_text"],
-        image_path=item["question_image"],
-        memory_context=memory_context,
-    )
+    if direct_answer is None:
+        messages, messages_for_log = build_messages(
+            system_prompt=system_prompt,
+            question_text=item["question_text"],
+            image_path=item["question_image"],
+            memory_context=memory_context,
+        )
+        execution_path = "retrieval_reader"
+    else:
+        messages = []
+        messages_for_log = []
+        execution_path = "end_to_end_agent"
     return {
         **item,
         "haystack_ids": haystack_ids,
@@ -615,6 +641,14 @@ def build_prompt_row(
         "memory_context_original_token_count": original_memory_token_count,
         "memory_context_token_count": truncated_memory_token_count,
         "memory_context_was_truncated": original_memory_token_count > truncated_memory_token_count,
+        "execution_path": execution_path,
+        "experiment_mode": (
+            direct_answer.get("metadata", {}).get("experiment_mode")
+            if isinstance(direct_answer, dict)
+            and isinstance(direct_answer.get("metadata"), dict)
+            else None
+        ),
+        "direct_answer": direct_answer,
         "messages": messages,
         "prompt_messages": messages_for_log,
         "is_abstention_problem": item["eval_name"] == "llm_abstention_checker",
@@ -928,6 +962,35 @@ async def generate_all_reader_outputs(
         args.reader_max_concurrent_requests > 0,
         "reader_max_concurrent_requests must be positive",
     )
+    outputs: dict[str, dict[str, Any]] = {}
+    reader_rows: list[dict[str, Any]] = []
+    for row in prompt_rows:
+        if row.get("execution_path") != "end_to_end_agent":
+            reader_rows.append(row)
+            continue
+        direct_answer = row.get("direct_answer")
+        require(isinstance(direct_answer, dict), f"Missing direct answer for {row['question_id']}")
+        response_raw = direct_answer.get("response_raw")
+        require(isinstance(response_raw, str) and response_raw.strip(), f"Empty direct answer for {row['question_id']}")
+        parsed_answer = extract_boxed_answer(response_raw)
+        raw_usage = direct_answer.get("usage")
+        usage_obj = raw_usage if isinstance(raw_usage, dict) else {}
+        prompt_tokens = int(usage_obj.get("prompt_tokens", usage_obj.get("input_tokens", 0)) or 0)
+        completion_tokens = int(usage_obj.get("completion_tokens", usage_obj.get("output_tokens", 0)) or 0)
+        outputs[row["question_id"]] = {
+            "response_raw": response_raw,
+            "response_parsed_boxed": parsed_answer,
+            "is_unknown": is_unknown(parsed_answer),
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": int(usage_obj.get("total_tokens", prompt_tokens + completion_tokens) or 0),
+            },
+        }
+
+    if not reader_rows:
+        return outputs
+
     client = create_async_client(args.base_url, args.api_key_env, args.api_key_file)
     semaphore = asyncio.Semaphore(args.reader_max_concurrent_requests)
 
@@ -952,8 +1015,7 @@ async def generate_all_reader_outputs(
             "usage": usage,
         }
 
-    tasks = [asyncio.create_task(run_one(row)) for row in prompt_rows]
-    outputs: dict[str, dict[str, Any]] = {}
+    tasks = [asyncio.create_task(run_one(row)) for row in reader_rows]
     with tqdm(total=len(tasks), desc="Generating", unit="q") as progress:
         for task in asyncio.as_completed(tasks):
             question_id, output = await task
@@ -1455,6 +1517,13 @@ def main() -> None:
                 "memory_context_original_token_count": row["memory_context_original_token_count"],
                 "memory_context_token_count": row["memory_context_token_count"],
                 "memory_context_was_truncated": row["memory_context_was_truncated"],
+                "execution_path": row["execution_path"],
+                "experiment_mode": row["experiment_mode"],
+                "direct_answer_metadata": (
+                    row["direct_answer"].get("metadata")
+                    if isinstance(row.get("direct_answer"), dict)
+                    else None
+                ),
                 "prompt_messages": row["prompt_messages"],
                 "answer_gold": row["answer_gold"],
                 "response_raw": row["response_raw"],

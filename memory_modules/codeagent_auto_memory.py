@@ -456,6 +456,7 @@ class CodeAgentAutoMemory(StatefulMemory):
             "usage": summary.get("usage") if isinstance(summary.get("usage"), dict) else None,
             "duration_seconds": float(summary.get("duration_seconds", 0.0)),
             "metadata": {
+                "experiment_mode": self.experiment_mode,
                 "query_invocation_id": summary["query_invocation_id"],
                 "attempt": summary["attempt"],
                 "main_memory_unchanged": summary["main_memory_unchanged"],
