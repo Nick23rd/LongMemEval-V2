@@ -9,6 +9,8 @@ param(
     [string]$Tier = "small",
     [string[]]$QuestionIds = @("05cce9b3"),
     [int]$HaystackLimit = 3,
+    [switch]$AllQuestions,
+    [switch]$FullHaystack,
     [string]$Python = "python",
     [string]$MemoryOffBinary = "codeagentcli",
     [string]$BaselineBinary = "codeagentcli",
@@ -29,7 +31,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $dataRootPath = (Resolve-Path -LiteralPath $DataRoot).Path
 $outputRootPath = [System.IO.Path]::GetFullPath($OutputRoot)
 
-if ($HaystackLimit -le 0) {
+if (-not $FullHaystack -and $HaystackLimit -le 0) {
     throw "HaystackLimit must be positive. This script is for structural smoke tests only."
 }
 if (Test-Path -LiteralPath $outputRootPath) {
@@ -56,15 +58,19 @@ function Invoke-Group {
         "--data-root", $dataRootPath,
         "--domain", $Domain,
         "--tier", $Tier,
-        "--question-ids"
-    ) + $QuestionIds + @(
-        "--haystack-limit", $HaystackLimit,
         "--codeagent-auto-memory-experiment-mode", $Mode,
         "--codeagent-auto-memory-binary", $Binary,
         "--codeagent-auto-memory-version-label", $VersionLabel,
         "--codeagent-auto-memory-ingest-max-attempts", "1",
         "--codeagent-auto-memory-query-max-attempts", "1"
     )
+    if (-not $AllQuestions) {
+        if ($QuestionIds.Count -eq 0) { throw "QuestionIds cannot be empty unless -AllQuestions is used" }
+        $common += @("--question-ids") + $QuestionIds
+    }
+    if (-not $FullHaystack) {
+        $common += @("--haystack-limit", $HaystackLimit)
+    }
     if ($IngestPromptFile) {
         $common += @("--codeagent-auto-memory-ingest-prompt-file", (Resolve-Path -LiteralPath $IngestPromptFile).Path)
     }
@@ -99,5 +105,9 @@ $comparisonDir = Join-Path $outputRootPath "comparison"
     --output-dir $comparisonDir
 if ($LASTEXITCODE -ne 0) { throw "Comparison failed with exit code $LASTEXITCODE" }
 
-Write-Host "Structural smoke run completed: $outputRootPath"
+if ($FullHaystack) {
+    Write-Host "Full-haystack regression run completed: $outputRootPath"
+} else {
+    Write-Host "Structural smoke run completed: $outputRootPath"
+}
 Write-Host "Report: $(Join-Path $comparisonDir 'report.md')"

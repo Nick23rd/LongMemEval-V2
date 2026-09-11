@@ -130,7 +130,7 @@
 ## 10. Phase 8：脚本与文档
 
 - [x] 增加可通过 question IDs 和 `--haystack-limit` 控制成本的开发结构冒烟配置。
-- [ ] 增加 small tier 三组完整回归脚本（当前脚本定位为截断 haystack 的结构冒烟）。
+- [x] 增加 small tier 三组完整回归脚本，要求显式 `-ConfirmFullRun` 且不截断 haystack。
 - [ ] 增加 medium tier 发布验证脚本。
 - [ ] 支持分别构建和加载三组 memory state。
 - [ ] 更新主 README 和手动测试文档。
@@ -196,6 +196,7 @@ Phase 0 是前置条件：未确认真实 CodeAgent 的记忆开关、读取方�
 | 2026-09-11 | Phase 4 | 已完成 | 支持版本标签及三类提示词覆盖；保存正文、SHA-256、binary/version 和 memory snapshot；加载时校验兼容性 |
 | 2026-09-11 | Phase 5 | 已完成 | 新增三组配对对比器，输出 comparison.json、逐题 diff 和 Markdown 报告；覆盖不匹配输入测试 |
 | 2026-09-11 | Phase 8 | 部分完成 | 新增 `--haystack-limit` 和 PowerShell 三组冒烟脚本；真实题 `05cce9b3` 完成构建、直接回答和比较闭环；memory_off 为零记忆文件 |
+| 2026-09-11 | Phase 8 | small 入口完成 | 新增正式 `run_codeagent_memory_regression_small.ps1`；按领域运行全部题目和完整 small haystack，并要求显式成本确认 |
 | 2026-09-11 | 基础设施修复 | 已完成 | Windows 临时目录与数据位于不同盘符时，相对截图链接安全回退为文件复制 |
 
 后续每完成一项，应更新对应复选框，并在本表追加日期、阶段、状态、验证命令和产物位置。

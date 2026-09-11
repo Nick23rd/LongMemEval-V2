@@ -151,6 +151,46 @@ memory_off 构建与直接回答
 <OutputRoot>/comparison/report.md
 ```
 
+## 5.1 正式 small tier 三组回归
+
+正式入口不会传入 `--haystack-limit`，会使用所选领域完整的 small haystack，并默认评测该领域全部问题。运行成本很高，必须显式提供 `-ConfirmFullRun`：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_regression_small.ps1 `
+  -DataRoot $env:DATA_ROOT `
+  -OutputRoot '.\runs\codeagent_small_web_01' `
+  -Domain web `
+  -Python $Python `
+  -MemoryOffBinary 'D:\builds\before\codeagentcli.exe' `
+  -BaselineBinary 'D:\builds\before\codeagentcli.exe' `
+  -CandidateBinary 'D:\builds\after\codeagentcli.exe' `
+  -BaselineVersionLabel 'before-change' `
+  -CandidateVersionLabel 'after-change' `
+  -ConfirmFullRun
+```
+
+Enterprise 领域应使用新的输出目录单独运行：
+
+```powershell
+& .\evaluation\scripts\run_codeagent_memory_regression_small.ps1 `
+  -DataRoot $env:DATA_ROOT `
+  -OutputRoot '.\runs\codeagent_small_enterprise_01' `
+  -Domain enterprise `
+  -Python $Python `
+  -BaselineBinary 'D:\builds\before\codeagentcli.exe' `
+  -CandidateBinary 'D:\builds\after\codeagentcli.exe' `
+  -MemoryOffBinary 'D:\builds\before\codeagentcli.exe' `
+  -ConfirmFullRun
+```
+
+正式报告只能来自未设置 `haystack_limit` 的运行。可以检查三组的：
+
+```powershell
+Get-Content '.\runs\codeagent_small_web_01\baseline\build\runtime_inputs\data_selection.json'
+```
+
+预期 `haystack_limit` 为 `null`，`structural_smoke_only` 为 `false`。
+
 先用一道题验证完整的记忆形成和保存链路：
 
 ```powershell
