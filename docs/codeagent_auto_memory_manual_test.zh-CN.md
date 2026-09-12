@@ -1,5 +1,7 @@
 # CodeAgent Auto Memory 手动测试手册
 
+> 本文是命令参考，不代表当前方案已具备发布条件。运行 calibration 或 full small 前，请检查[项目状态与下一步](codeagent_memory_project_status.zh-CN.md)中的阻塞项和环境就绪标志。
+
 本文说明如何在 Windows PowerShell 中验证 `codeagent_auto_memory`。建议按“静态检查 → fake CLI 单元测试 → 真实构建冒烟 → 加载记忆评测”的顺序执行。前两步不调用模型；真实构建和评测会产生模型用量。
 
 ## 1. 进入仓库并选择 Python

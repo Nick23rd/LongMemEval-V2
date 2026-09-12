@@ -89,6 +89,15 @@ def test_source_launcher_command_is_used_for_version_and_sessions(tmp_path: Path
     ]
 
 
+def test_windows_command_shim_is_resolved_without_a_shell() -> None:
+    with patch("memory_modules.codeagent_auto_memory.os.name", "nt"), patch(
+        "memory_modules.codeagent_auto_memory.shutil.which",
+        return_value="C:/tools/bun.cmd",
+    ) as which:
+        assert CodeAgentAutoMemory._executable(["bun", "cli.tsx"]) == "C:/tools/bun.cmd"
+    which.assert_called_once_with("bun")
+
+
 def test_query_launcher_override_requires_explicit_attribution_mode(tmp_path: Path) -> None:
     with patch("memory_modules.codeagent_auto_memory.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess([], 0, "version-a\n", "")
@@ -146,6 +155,24 @@ def test_invalid_experiment_mode_is_rejected(tmp_path: Path) -> None:
             CodeAgentAutoMemory(config)
 
 
+def test_free_code_runtime_uses_claude_auto_memory_environment(tmp_path: Path) -> None:
+    config = _config(tmp_path / "workspace", tmp_path)
+    params = config["codeagent_auto_memory_params"]
+    assert isinstance(params, dict)
+    params["runtime"] = "free_code"
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess([], 0, "2.1.87-dev (Claude Code)\n", "")
+        memory = CodeAgentAutoMemory(config)
+
+    env = memory._environment(tmp_path / "isolated-memory")
+    assert env["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"] == str((tmp_path / "isolated-memory").resolve())
+    assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
+    assert "historical trajectory" in env["CLAUDE_COWORK_MEMORY_EXTRA_GUIDELINES"]
+    assert env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "0"
+    assert "CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE" not in env
+    assert memory.memory_config["memory_params"]["codeagent_auto_memory_params"]["runtime"] == "free_code"
+
+
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
     screenshot = tmp_path / "state.png"
     screenshot.write_bytes(b"png")
@@ -164,12 +191,14 @@ def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
         assert "--dangerously-skip-permissions" not in command
         calls.append({"cwd": cwd, "memory_dir": memory_dir, "command": command})
         if "--tools=Read,Write,Edit,Glob,Grep" in command:
+            assert "--allowedTools=Read,Write,Edit,Glob,Grep" in command
             assert (cwd / "trajectory" / "trajectory.json").exists()
             memory_dir.mkdir(parents=True, exist_ok=True)
             (memory_dir / "MEMORY.md").write_text("Locale is zh-CN.\n", encoding="utf-8")
             result_text = "Memory saved"
         else:
             assert "--tools=Read" in command
+            assert "--allowedTools=Read" in command
             assert "dontAsk" in command
             assert not (cwd / "trajectory").exists()
             assert (cwd / "question.json").exists()

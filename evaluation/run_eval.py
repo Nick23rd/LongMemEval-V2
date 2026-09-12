@@ -150,6 +150,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codeagent-auto-memory-ingest-launcher-command-json", default=os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_LAUNCHER_COMMAND_JSON"))
     parser.add_argument("--codeagent-auto-memory-query-launcher-command-json", default=os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_LAUNCHER_COMMAND_JSON"))
     parser.add_argument("--codeagent-auto-memory-allow-query-override-on-load", action=argparse.BooleanOptionalAction, default=env_bool("CODEAGENT_AUTO_MEMORY_ALLOW_QUERY_OVERRIDE_ON_LOAD", False))
+    parser.add_argument(
+        "--codeagent-auto-memory-runtime",
+        choices=["codeagent", "free_code"],
+        default=os.getenv("CODEAGENT_AUTO_MEMORY_RUNTIME", "codeagent"),
+        help="CLI environment-variable dialect used for isolated native auto-memory",
+    )
     parser.add_argument("--codeagent-auto-memory-model", default=os.getenv("CODEAGENT_AUTO_MEMORY_MODEL"))
     parser.add_argument("--codeagent-auto-memory-timeout-seconds", type=float, default=float(os.getenv("CODEAGENT_AUTO_MEMORY_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--codeagent-auto-memory-ingest-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_TURNS", "30")))
@@ -402,6 +408,7 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                     **({"ingest_launcher_command": ingest_launcher_command} if ingest_launcher_command is not None else {}),
                     **({"query_launcher_command": query_launcher_command} if query_launcher_command is not None else {}),
                     "allow_query_override_on_load": args.codeagent_auto_memory_allow_query_override_on_load,
+                    "runtime": args.codeagent_auto_memory_runtime,
                     "model": args.codeagent_auto_memory_model,
                     "timeout_seconds": args.codeagent_auto_memory_timeout_seconds,
                     "ingest_max_turns": args.codeagent_auto_memory_ingest_max_turns,

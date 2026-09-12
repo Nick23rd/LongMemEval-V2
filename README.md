@@ -24,6 +24,8 @@ This is the official LongMemEval-V2 repository. It contains the public
 evaluation harness, data preparation tools, leaderboard packaging utilities,
 and the memory baselines reported with the benchmark.
 
+> **Fork development status:** this branch contains an in-progress CodeAgent / free-code native-memory regression harness. Before running calibration or full small, read the [current status, blockers, environment readiness checklist, and next steps](docs/codeagent_memory_project_status.zh-CN.md). The experimental historical-session path is faster but is not yet valid for benchmark conclusions.
+
 ## News 
 - [2026/08] Update: [AgentRunbook-C V2](https://xiaowu0162.github.io/longmemeval-v2/agentrunbook-c-v2/).
 
@@ -94,6 +96,24 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset calib
 See the [evaluation-environment runbook](docs/codeagent_memory_evaluation_environment_runbook.zh-CN.md)
 for Node/Bun execution, source launchers, prompt-only experiments, recovery with `--resume`, report
 interpretation, and the calibration acceptance criteria.
+
+The runner also supports the `free-code` Claude-compatible source tree. Select
+its environment-variable dialect and pass its Bun entrypoint as the launcher:
+
+```powershell
+node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke `
+  --data-root data/longmemeval-v2 --output-root runs/free_code_smoke `
+  --runtime free_code `
+  --memory-off-launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --baseline-launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --candidate-launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]'
+```
+
+The `free_code` runtime keeps the caller's existing authentication and user
+configuration, redirects native memory to the isolated evaluation snapshot,
+adds a benchmark-specific native-memory policy for ephemeral trajectory facts,
+and disables unrelated prompt-suggestion model calls. Do not use `--bare`,
+because `free-code` implements it by disabling auto-memory.
 
 ## Setup: Environment
 

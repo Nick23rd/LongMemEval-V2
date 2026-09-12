@@ -7,6 +7,7 @@
       "ingest_launcher_command": ["codeagentcli"],
       "query_launcher_command": ["codeagentcli"],
       "allow_query_override_on_load": false,
+      "runtime": "codeagent",
       "model": null,
       "timeout_seconds": 1800.0,
       "ingest_max_turns": 30,

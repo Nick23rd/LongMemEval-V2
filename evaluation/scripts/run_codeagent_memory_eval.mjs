@@ -56,6 +56,7 @@ Launcher values are JSON argv arrays:
 Common options:
   --python PATH                    Auto-detected from .venv when omitted
   --model NAME                     CodeAgent model; omit to use its configured default
+  --runtime NAME                   Memory environment dialect: codeagent (default) or free_code
   --ingest-max-turns N             Default 60
   --query-max-turns N              Default 20
   --ingest-max-attempts N          Default 2
@@ -145,6 +146,7 @@ function commonEvalArgs(options, selected, mode, ingestLauncher, ingestPrompt) {
     join(repoRoot, "evaluation", "run_eval.py"), "--method", "codeagent_auto_memory",
     "--data-root", requirePath(options["data-root"], "data root"), "--domain", selected.domain,
     "--tier", selected.tier, "--codeagent-auto-memory-experiment-mode", mode,
+    "--codeagent-auto-memory-runtime", options.runtime ?? "codeagent",
     "--codeagent-auto-memory-launcher-command-json", JSON.stringify(ingestLauncher),
     "--codeagent-auto-memory-ingest-launcher-command-json", JSON.stringify(ingestLauncher),
     "--codeagent-auto-memory-timeout-seconds", numberOption(options, "timeout-seconds", 1800),

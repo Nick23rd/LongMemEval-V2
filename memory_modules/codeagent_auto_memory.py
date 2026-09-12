@@ -23,6 +23,21 @@ DEFAULT_INGEST_MAX_ATTEMPTS = 1
 DEFAULT_QUERY_MAX_ATTEMPTS = 3
 DEFAULT_EXPERIMENT_MODE = "baseline"
 EXPERIMENT_MODES = {"memory_off", "baseline", "candidate"}
+RUNTIME_ENVIRONMENTS = {
+    "codeagent": {
+        "memory_path": "CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE",
+        "disable_auto_memory": "CODEAGENT3_DISABLE_AUTO_MEMORY",
+        "simple": "CODEAGENT3_SIMPLE",
+    },
+    "free_code": {
+        "memory_path": "CLAUDE_COWORK_MEMORY_PATH_OVERRIDE",
+        "disable_auto_memory": "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+        "simple": "CLAUDE_CODE_SIMPLE",
+    },
+}
+
+FREE_CODE_MEMORY_GUIDELINES = """LongMemEval evaluation override:
+The historical trajectory supplied for ingestion is the authoritative record of a past external environment and will not be available to future sessions. Persist directly supported, reusable facts needed to answer future questions, including website state, workflows, settings, identifiers, failure causes, exceptions, and verified debugging outcomes. For this evaluation these facts are not derivable from the temporary project directory, so the usual exclusions for repository-derived state and debugging recipes do not apply to them. Do not save the evaluation question or expected answer."""
 
 INGEST_PROMPT = """This is a completed historical work session.
 
@@ -189,6 +204,12 @@ class CodeAgentAutoMemory(StatefulMemory):
             isinstance(self.allow_query_override_on_load, bool),
             "allow_query_override_on_load must be boolean",
         )
+        runtime = params.get("runtime", "codeagent")
+        require(
+            isinstance(runtime, str) and runtime in RUNTIME_ENVIRONMENTS,
+            f"codeagent auto-memory runtime must be one of {sorted(RUNTIME_ENVIRONMENTS)}",
+        )
+        self.runtime = runtime
         model = params.get("model")
         require(model is None or (isinstance(model, str) and model.strip()), "codeagent auto-memory model must be null or a non-empty string")
         self.model = model.strip() if isinstance(model, str) else None
@@ -299,6 +320,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         try:
             result = subprocess.run(
                 [*launcher_command, "--version"],
+                executable=self._executable(launcher_command),
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -308,6 +330,13 @@ class CodeAgentAutoMemory(StatefulMemory):
             return None
         return (result.stdout or result.stderr).strip() or None
 
+    @staticmethod
+    def _executable(command: list[str]) -> str | None:
+        """Resolve Windows .cmd/.exe shims without enabling a command shell."""
+        if os.name != "nt":
+            return None
+        return shutil.which(command[0])
+
     @property
     def memory_config(self) -> MemoryConfig:
         params: dict[str, object] = {
@@ -316,6 +345,7 @@ class CodeAgentAutoMemory(StatefulMemory):
             "ingest_launcher_command": list(self.ingest_launcher_command),
             "query_launcher_command": list(self.query_launcher_command),
             "allow_query_override_on_load": self.allow_query_override_on_load,
+            "runtime": self.runtime,
             "model": self.model,
             "timeout_seconds": self.timeout_seconds,
             "ingest_max_turns": self.ingest_max_turns,
@@ -372,6 +402,7 @@ class CodeAgentAutoMemory(StatefulMemory):
                 if key in requested_params:
                     saved_params[key] = requested_params[key]
         for key, default in (
+            ("runtime", "codeagent"),
             ("experiment_mode", DEFAULT_EXPERIMENT_MODE),
             ("version_label", None),
             ("ingest_prompt", INGEST_PROMPT),
@@ -418,12 +449,20 @@ class CodeAgentAutoMemory(StatefulMemory):
         )
         command = [*launcher_command, "-p", "--output-format", "json", "--no-session-persistence", "--max-turns", str(max_turns)]
         if ingestion:
-            command.extend(["--permission-mode", "acceptEdits", "--tools=Read,Write,Edit,Glob,Grep"])
+            command.extend([
+                "--permission-mode", "acceptEdits",
+                "--tools=Read,Write,Edit,Glob,Grep",
+                "--allowedTools=Read,Write,Edit,Glob,Grep",
+            ])
         else:
             # Native auto-memory injects an index, then asks the agent to read
             # the selected memory file. Keep queries read-only rather than
             # disabling every tool.
-            command.extend(["--permission-mode", "dontAsk", "--tools=Read"])
+            command.extend([
+                "--permission-mode", "dontAsk",
+                "--tools=Read",
+                "--allowedTools=Read",
+            ])
         if self.model is not None:
             command.extend(["--model", self.model])
         command.extend(self.extra_args)
@@ -432,15 +471,28 @@ class CodeAgentAutoMemory(StatefulMemory):
 
     def _environment(self, memory_dir: Path) -> dict[str, str]:
         environment = dict(os.environ)
-        environment["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"] = str(memory_dir.resolve())
-        environment["CODEAGENT3_DISABLE_AUTO_MEMORY"] = (
+        runtime_environment = RUNTIME_ENVIRONMENTS[self.runtime]
+        environment[runtime_environment["memory_path"]] = str(memory_dir.resolve())
+        environment[runtime_environment["disable_auto_memory"]] = (
             "1" if self.experiment_mode == "memory_off" else "0"
         )
         # Inherit the configured CodeAgent config so its selected model and
         # credentials remain available. Session isolation is provided by the
         # temporary cwd plus --no-session-persistence; memory is independently
         # redirected to the frozen per-call snapshot above.
-        environment.pop("CODEAGENT3_SIMPLE", None)
+        environment.pop(runtime_environment["simple"], None)
+        if self.runtime == "free_code":
+            # free-code's native policy normally excludes debugging recipes and
+            # project-derived facts. A benchmark trajectory is an external,
+            # ephemeral source, so make that distinction explicit in the same
+            # native memory prompt rather than relying on the user prompt to
+            # override higher-priority memory instructions.
+            environment["CLAUDE_COWORK_MEMORY_EXTRA_GUIDELINES"] = (
+                FREE_CODE_MEMORY_GUIDELINES
+            )
+            # Prompt suggestions are unrelated to memory evaluation and can
+            # otherwise add an unreported background model call in headless mode.
+            environment["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "0"
         return environment
 
     def _run(self, *, session_dir: Path, memory_dir: Path, prompt: str, max_turns: int, ingestion: bool) -> dict[str, Any]:
@@ -448,7 +500,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         started = time.time()
         timed_out = False
         try:
-            result = subprocess.run(command, cwd=session_dir, env=self._environment(memory_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self.timeout_seconds, check=False)
+            result = subprocess.run(command, executable=self._executable(command), cwd=session_dir, env=self._environment(memory_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self.timeout_seconds, check=False)
             returncode, stdout, stderr = result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired as exc:
             timed_out = True
@@ -547,7 +599,7 @@ class CodeAgentAutoMemory(StatefulMemory):
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
-        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_ingest_version, "detected_ingest_version": self.detected_ingest_version, "detected_query_version": self.detected_query_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "ingest_launcher_command": list(self.ingest_launcher_command), "query_launcher_command": list(self.query_launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "runtime": self.runtime, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_ingest_version, "detected_ingest_version": self.detected_ingest_version, "detected_query_version": self.detected_query_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "ingest_launcher_command": list(self.ingest_launcher_command), "query_launcher_command": list(self.query_launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
         _write_json(self.workspace_dir / "prompt_manifest.json", self._prompt_manifest())
         usage_totals: dict[str, float] = {}
         for record in self.ingestion_records:

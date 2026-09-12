@@ -1,5 +1,7 @@
 # CodeAgent 记忆归因测评环境运行手册
 
+> 开始前先阅读[项目状态与下一步](codeagent_memory_project_status.zh-CN.md)。截至 2026-09-12，正式文件摄取路径可运行但成本很高；experimental historical-session 路径虽更快但完整 100 条召回失败。不要在其通过内部 `Message[]` importer 和 10 题 calibration 前运行 full small。
+
 ## 1. 首次运行目标
 
 先运行固定的 web/small 10 题校准集，而不是直接发布完整 small 分数。校准运行会：

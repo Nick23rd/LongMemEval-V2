@@ -15,6 +15,7 @@ def test_cross_platform_runner_builds_calibration_commands_without_shell() -> No
             "--data-root", str(repo / "data/longmemeval-v2"),
             "--output-root", str(repo / "runs/dry-run-not-created"),
             "--confirm-full-haystack", "--dry-run",
+            "--runtime", "free_code",
             "--writer-a-launcher", '["before"]', "--writer-b-launcher", '["bun","candidate.ts"]',
             "--recall-a-launcher", '["before"]', "--recall-b-launcher", '["bun","candidate.ts"]',
         ],
@@ -28,4 +29,5 @@ def test_cross_platform_runner_builds_calibration_commands_without_shell() -> No
     assert "writer_b:build" in result.stdout
     assert "aa:evaluate" in result.stdout and "bb:evaluate" in result.stdout
     assert "attribution:report" in result.stdout
+    assert '\"free_code\"' in result.stdout
     assert not (repo / "runs/dry-run-not-created").exists()

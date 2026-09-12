@@ -11,7 +11,7 @@
 
 任务状态约定：`[ ]` 未开始，`[-]` 进行中，`[x]` 已完成，`[!]` 受阻。
 
-当前总体状态：**Phase 0～6 已完成；正式 small、固定 10 题校准和写入/召回 2×2 归因入口已具备。下一阶段是在专用测评环境运行真实 A/B 校准，再开展重复运行统计**。
+当前总体状态：**Phase 0～6 和运行入口已经完成，但 2026-09-12 的 free-code 完整 100 条验证发现正式文件摄取过慢，而 experimental historical-session 虽快 8～10 倍却因单消息包装导致记忆覆盖失败。下一阶段是实现真正的内部 `Message[]` importer；在它通过固定 3 条、完整单题和 10 题 calibration 前，不运行正式 small。最新权威状态见[项目状态与下一步](codeagent_memory_project_status.zh-CN.md)**。
 
 ## 2. Phase 0：确认真实 CodeAgent 行为
 
