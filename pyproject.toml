@@ -28,3 +28,4 @@ packages = ["data", "evaluation", "memory_modules"]
 
 [tool.setuptools.package-data]
 memory_modules = ["assets/agentrunbook_c/INSTRUCTION.md", "assets/agentrunbook_c/scripts/*.py"]
+evaluation = ["codeagent_memory_results.html"]

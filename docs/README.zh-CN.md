@@ -4,8 +4,9 @@
 
 ## 目标与架构
 
+- [原生记忆 Agent 黑盒适配协议](native_memory_agent_adapter.zh-CN.md)：开源/闭源 Agent 的统一生命周期、能力声明与接入边界。
 - [CodeAgent 内部记忆回归评测目标](codeagent_memory_regression_evaluation_goal.zh-CN.md)：评测问题、实验边界和验收标准。
-- [CodeAgent 内部记忆回归评测设计](codeagent_memory_regression_evaluation_design.zh-CN.md)：三臂回归、端到端回答、隔离和指标设计。
+- [CodeAgent 内部记忆回归评测设计](codeagent_memory_regression_evaluation_design.zh-CN.md)：历史设计记录；当前执行语义以项目状态页为准。
 - [记忆评测改造计划与历史进度](codeagent_memory_regression_migration_plan.zh-CN.md)：已完成工程阶段、TODO 和历史决策。
 
 ## 当前状态与实验
@@ -18,7 +19,7 @@
 ## 环境与运行
 
 - [测评环境运行手册](codeagent_memory_evaluation_environment_runbook.zh-CN.md)：新机器环境搭建、launcher、校准入口和产物验收。
-- [Auto-memory 手动测试手册](codeagent_auto_memory_manual_test.zh-CN.md)：smoke、regression、attribution、resume 和 full small 命令。
+- [Auto-memory 手动测试手册](codeagent_auto_memory_manual_test.zh-CN.md)：single、memory-off、resume 和 full small 命令。
 - [编码智能体记忆评测与对比](code_agent_evaluation.zh-CN.md)：通用 Codex、Claude Code、CodeAgent 运行与报告流程。
 - [Coding-agent 工具配置](coding-agent-tools.zh-CN.md)：各类 coding agent CLI 的配置方式。
 

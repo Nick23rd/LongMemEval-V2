@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .memory import AgentAnswer, MemoryConfig, MemoryContextItem, StatefulMemory, register_memory, require
+from .memory import AgentAnswer, MemoryConfig, MemoryContextItem, register_memory, require
+from .native_memory_agent import NativeMemoryAgent, NativeMemoryCapabilities
+from .historical_session import build_historical_session_payload
 from .trajectory_store import materialize_prepared_trajectory, prepare_trajectory_insert
 
 
@@ -21,8 +23,9 @@ DEFAULT_INGEST_MAX_TURNS = 30
 DEFAULT_QUERY_MAX_TURNS = 20
 DEFAULT_INGEST_MAX_ATTEMPTS = 1
 DEFAULT_QUERY_MAX_ATTEMPTS = 3
-DEFAULT_EXPERIMENT_MODE = "baseline"
-EXPERIMENT_MODES = {"memory_off", "baseline", "candidate"}
+DEFAULT_EXPERIMENT_MODE = "single"
+EXPERIMENT_MODES = {"single", "memory_off"}
+INGESTION_STRATEGIES = {"trajectory_file", "historical_session"}
 RUNTIME_ENVIRONMENTS = {
     "codeagent": {
         "memory_path": "CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE",
@@ -135,7 +138,7 @@ def _replace_tree(source: Path, destination: Path) -> None:
 def _copy_audit_files(session_dir: Path, audit_dir: Path) -> None:
     """Keep reproducibility logs without duplicating every memory snapshot."""
     audit_dir.mkdir(parents=True, exist_ok=False)
-    for filename in ("stdout.log", "stderr.log", "summary.json", "question.json"):
+    for filename in ("stdout.log", "stderr.log", "summary.json", "question.json", "historical_session.json"):
         source = session_dir / filename
         if source.exists():
             shutil.copy2(source, audit_dir / filename)
@@ -168,8 +171,17 @@ def _parse_result(stdout: str) -> tuple[str | None, dict[str, Any] | None, list[
 
 
 @register_memory
-class CodeAgentAutoMemory(StatefulMemory):
+class CodeAgentAutoMemory(NativeMemoryAgent):
     memory_type = "codeagent_auto_memory"
+    parameter_namespace = "codeagent_auto_memory_params"
+    adapter_name = "codeagent_cli"
+    capabilities = NativeMemoryCapabilities(
+        trajectory_file_ingestion=True,
+        fresh_query_session=True,
+        frozen_memory_snapshot=True,
+        historical_session_import=True,
+        local_memory_state=True,
+    )
 
     def __init__(self, memory_params: dict[str, object]) -> None:
         super().__init__(memory_params)
@@ -224,6 +236,17 @@ class CodeAgentAutoMemory(StatefulMemory):
             f"codeagent auto-memory experiment_mode must be one of {sorted(EXPERIMENT_MODES)}",
         )
         self.experiment_mode = experiment_mode
+        ingestion_strategy = params.get("ingestion_strategy", "trajectory_file")
+        require(
+            isinstance(ingestion_strategy, str)
+            and ingestion_strategy in INGESTION_STRATEGIES,
+            f"codeagent auto-memory ingestion_strategy must be one of {sorted(INGESTION_STRATEGIES)}",
+        )
+        require(
+            ingestion_strategy != "historical_session" or self.runtime == "free_code",
+            "historical_session ingestion requires runtime=free_code",
+        )
+        self.ingestion_strategy = ingestion_strategy
         version_label = params.get("version_label")
         require(
             version_label is None or (isinstance(version_label, str) and version_label.strip()),
@@ -353,6 +376,7 @@ class CodeAgentAutoMemory(StatefulMemory):
             "ingest_max_attempts": self.ingest_max_attempts,
             "query_max_attempts": self.query_max_attempts,
             "experiment_mode": self.experiment_mode,
+            "ingestion_strategy": self.ingestion_strategy,
             "version_label": self.version_label,
             "ingest_prompt": self.ingest_prompt,
             "query_prompt": self.query_prompt,
@@ -404,6 +428,7 @@ class CodeAgentAutoMemory(StatefulMemory):
         for key, default in (
             ("runtime", "codeagent"),
             ("experiment_mode", DEFAULT_EXPERIMENT_MODE),
+            ("ingestion_strategy", "trajectory_file"),
             ("version_label", None),
             ("ingest_prompt", INGEST_PROMPT),
             ("query_prompt", QUERY_PROMPT),
@@ -493,7 +518,104 @@ class CodeAgentAutoMemory(StatefulMemory):
             # Prompt suggestions are unrelated to memory evaluation and can
             # otherwise add an unreported background model call in headless mode.
             environment["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "0"
+            if self.ingestion_strategy == "historical_session":
+                environment["CLAUDE_CODE_BENCHMARK_HISTORICAL_SESSION"] = "1"
         return environment
+
+    def _run_historical_session(
+        self,
+        *,
+        session_dir: Path,
+        memory_dir: Path,
+        trajectory: dict[str, object],
+    ) -> dict[str, Any]:
+        payload = build_historical_session_payload(trajectory)
+        payload_path = session_dir / "historical_session.json"
+        payload_path.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        command = [
+            *self.ingest_launcher_command,
+            "-p",
+            "--output-format",
+            "json",
+            "--no-session-persistence",
+            "--tools=Read,Write,Edit,Glob,Grep",
+            "--allowedTools=Read,Write,Edit,Glob,Grep",
+            "--session-id",
+            str(payload["session_id"]),
+            "--benchmark-historical-session",
+            str(payload_path.resolve()),
+        ]
+        if self.model is not None:
+            command.extend(["--model", self.model])
+        command.extend(self.extra_args)
+        # The current CLI dispatches -p through its headless action only when
+        # a positional prompt is present. The importer returns before the query
+        # loop, so this sentinel is never sent to a model or added to Message[].
+        command.append("historical-session-import")
+        started = time.time()
+        timed_out = False
+        try:
+            result = subprocess.run(
+                command,
+                executable=self._executable(command),
+                cwd=session_dir,
+                env=self._environment(memory_dir),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+            returncode, stdout, stderr = result.returncode, result.stdout, result.stderr
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            returncode = None
+            stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        except OSError as exc:
+            returncode, stdout, stderr = None, "", str(exc)
+        (session_dir / "stdout.log").write_text(stdout, encoding="utf-8")
+        (session_dir / "stderr.log").write_text(stderr, encoding="utf-8")
+        events = []
+        for line in stdout.splitlines():
+            try:
+                event = json.loads(line.strip())
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        import_result = events[-1] if events else None
+        extraction = import_result.get("extraction") if isinstance(import_result, dict) else None
+        usage = None
+        if isinstance(extraction, dict) and isinstance(extraction.get("usage"), dict):
+            raw_usage = extraction["usage"]
+            usage = {
+                "input_tokens": raw_usage.get("inputTokens", 0),
+                "output_tokens": raw_usage.get("outputTokens", 0),
+                "cache_read_input_tokens": raw_usage.get("cacheReadInputTokens", 0),
+                "cache_creation_input_tokens": raw_usage.get("cacheCreationInputTokens", 0),
+                "num_turns": extraction.get("turnCount", 0),
+                "total_cost_usd": extraction.get("costUsd", 0),
+                "duration_api_ms": extraction.get("apiDurationMs", 0),
+            }
+        return {
+            "command": command,
+            "started_at_utc": datetime.fromtimestamp(started, timezone.utc).isoformat(),
+            "completed_at_utc": _utc_now(),
+            "duration_seconds": time.time() - started,
+            "returncode": returncode,
+            "timed_out": timed_out,
+            "usage": usage,
+            "result": extraction.get("status") if isinstance(extraction, dict) else None,
+            "event_count": len(events),
+            "historical_session_import": import_result,
+            "main_agent_turns": import_result.get("mainAgentTurns") if isinstance(import_result, dict) else None,
+        }
 
     def _run(self, *, session_dir: Path, memory_dir: Path, prompt: str, max_turns: int, ingestion: bool) -> dict[str, Any]:
         command = self._command(prompt, max_turns, ingestion=ingestion)
@@ -550,13 +672,32 @@ class CodeAgentAutoMemory(StatefulMemory):
             session_dir.mkdir()
             isolated_memory = session_dir / "auto_memory"
             shutil.copytree(main_memory, isolated_memory)
-            materialize_prepared_trajectory(prepared, session_dir / "trajectory")
-            summary = self._run(session_dir=session_dir, memory_dir=isolated_memory, prompt=self.ingest_prompt, max_turns=self.ingest_max_turns, ingestion=True)
+            if self.ingestion_strategy == "historical_session":
+                summary = self._run_historical_session(
+                    session_dir=session_dir,
+                    memory_dir=isolated_memory,
+                    trajectory=trajectory,
+                )
+            else:
+                materialize_prepared_trajectory(prepared, session_dir / "trajectory")
+                summary = self._run(session_dir=session_dir, memory_dir=isolated_memory, prompt=self.ingest_prompt, max_turns=self.ingest_max_turns, ingestion=True)
             after = _memory_snapshot(isolated_memory)
             changes = _snapshot_diff(before, after)
             changed = any(changes.values())
             if summary["returncode"] != 0:
                 status = "failed"
+            elif self.ingestion_strategy == "historical_session" and summary.get("main_agent_turns") != 0:
+                status = "failed"
+                summary["validation_error"] = "historical-session importer invoked the main agent"
+            elif self.ingestion_strategy == "historical_session" and summary.get("result") not in {"saved", "no_memory_worthy"}:
+                status = "failed"
+                summary["validation_error"] = "historical-session importer returned no valid extraction status"
+            elif self.ingestion_strategy == "historical_session" and summary.get("result") == "saved" and not changed:
+                status = "failed"
+                summary["validation_error"] = "extractor reported saved without a memory snapshot change"
+            elif self.ingestion_strategy == "historical_session" and summary.get("result") == "no_memory_worthy" and changed:
+                status = "failed"
+                summary["validation_error"] = "extractor reported no_memory_worthy but changed memory"
             elif self.experiment_mode == "memory_off" and changed:
                 status = "isolation_failed"
             elif self.experiment_mode == "memory_off":
@@ -599,7 +740,7 @@ class CodeAgentAutoMemory(StatefulMemory):
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
-        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "runtime": self.runtime, "experiment_mode": self.experiment_mode, "version_label": self.version_label, "detected_version": self.detected_ingest_version, "detected_ingest_version": self.detected_ingest_version, "detected_query_version": self.detected_query_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "ingest_launcher_command": list(self.ingest_launcher_command), "query_launcher_command": list(self.query_launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
+        _write_json(self.workspace_dir / "ingestion_manifest.json", {"memory_type": self.memory_type, "native_memory_adapter": self.adapter_manifest(), "runtime": self.runtime, "experiment_mode": self.experiment_mode, "ingestion_strategy": self.ingestion_strategy, "version_label": self.version_label, "detected_version": self.detected_ingest_version, "detected_ingest_version": self.detected_ingest_version, "detected_query_version": self.detected_query_version, "binary": str(self.binary), "launcher_command": list(self.launcher_command), "ingest_launcher_command": list(self.ingest_launcher_command), "query_launcher_command": list(self.query_launcher_command), "prompt_hashes": {name: item["sha256"] for name, item in self._prompt_manifest().items()}, "build_status": status, "ingestion_plan": self.ingestion_plan, "trajectory_ids": self.inserted_trajectory_ids, "records": self.ingestion_records, "memory_snapshot_digest": _snapshot_digest(snapshot), "updated_at_utc": _utc_now()})
         _write_json(self.workspace_dir / "prompt_manifest.json", self._prompt_manifest())
         usage_totals: dict[str, float] = {}
         for record in self.ingestion_records:

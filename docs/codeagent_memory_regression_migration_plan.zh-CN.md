@@ -1,5 +1,8 @@
 # CodeAgent 内部记忆回归评测改造计划书
 
+> 本文是历史实施记录。三臂与四象限入口已经移除；当前只执行单包 single，
+> 并以 `--memory-off` 作为可选的无记忆单次测评。请勿按本文旧命令启动新评测。
+
 ## 1. 目标和状态
 
 将当前 `codeagent_auto_memory` 的“记忆证据输出 + 外部 reader”路径，改造成支持 `memory_off`、`baseline`、`candidate` 三组实验的端到端回归框架。
@@ -90,7 +93,7 @@
 
 ## 7. Phase 5：回归对比器
 
-建议新增 `evaluation/compare_memory_regression.py`。
+历史阶段曾新增 `evaluation/compare_memory_regression.py`；该三臂比较器现已随多臂入口移除。
 
 - [x] 接受三组 `per_question.jsonl` 或对应运行目录。
 - [x] 校验 question ID 完全一致且无重复。

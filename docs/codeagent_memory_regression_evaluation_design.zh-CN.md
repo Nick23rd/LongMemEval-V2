@@ -1,10 +1,16 @@
 # CodeAgent 内部记忆回归评测设计
 
+> 状态更新：执行入口现已改为按 CLI commit 独立留存的 `single` 单次评测。
+> 三臂和四象限执行入口已移除；本文相关章节仅保留为历史设计记录，不是可执行手册。
+> 不同时间和 commit 的单臂运行可在产物保留后另行配对分析。
+> `memory_off` 仅保留为极小隔离 smoke：在轨迹 session、问题 session 和持久化记忆均隔离的前提下，
+> 完整遍历 haystack 不会为最终问题提供上下文，因此不再运行昂贵的 full-small `memory_off` 对照。
+
 ## 1. 目的
 
 本设计用于把 LongMemEval-V2 改造成 CodeAgent 内部记忆机制的版本回归评测框架，回答：修改记忆写入提示词、存储方式或召回算法后，新版本相对于旧版本有哪些改进和退化？
 
-主要比较是 `candidate - baseline`。`memory_off` 是辅助控制组，用来估计两个版本相对于“同样经历轨迹但无法跨会话记忆”的真实收益。完整目标和验收原则见 [CodeAgent 内部记忆回归评测目标](codeagent_memory_regression_evaluation_goal.zh-CN.md)。
+主要比较是相同配置下两个包的独立 `single` 结果。需要关闭记忆时，对其中一个包单独增加 `--memory-off`；`memory_off` 只用于验证没有记忆文件、可恢复会话或其他跨会话泄漏，不用于日常 full-small。完整目标和验收原则见 [CodeAgent 内部记忆回归评测目标](codeagent_memory_regression_evaluation_goal.zh-CN.md)。
 
 ## 2. 现有数据适用性
 
@@ -38,7 +44,16 @@ CodeAgent 读取轨迹并形成 auto-memory
 
 改造后，CodeAgent 必须在全新会话中自动使用内部记忆并直接产生最终答案；外部 reader 不参与这条评测路径。
 
-## 4. 三组实验
+## 4. 默认单臂与历史三组实验
+
+默认对每个 CLI commit 独立执行：
+
+```text
+Web 100 条轨迹 → Web 冻结记忆 → 回答 240 道 Web 问题
+Enterprise 100 条轨迹 → Enterprise 冻结记忆 → 回答 211 道 Enterprise 问题
+```
+
+两份领域记忆必须分开保存。不同 commit 的运行通过 commit、题单、配置、提示词哈希和轨迹指纹离线配对比较。以下三组仅是 legacy 入口。
 
 ### 4.1 memory_off
 
@@ -50,7 +65,7 @@ CodeAgent 读取轨迹并形成 auto-memory
 → 在全新、独立的问题会话中直接回答
 ```
 
-`memory_off` 不是“不读取轨迹”。它完成相同的轨迹处理过程，只禁止经验跨会话持久化。
+历史实现会让 `memory_off` 完成相同的轨迹处理过程，只禁止经验跨会话持久化。但在当前强隔离设计下，这些轨迹 session 的计算结果不会进入问题 session；因此完整运行只重复验证一个必然结果。日常流程只用少量轨迹做隔离 smoke，不运行完整对照。
 
 ### 4.2 baseline
 
@@ -229,7 +244,7 @@ B 写入形成的记忆 + 固定召回
 
 ## 10. 结论
 
-现有数据、标准答案和评分函数足以支持目标评测。主要工程改造是：端到端直接回答接口、真正读取轨迹的 `memory_off`、harness 绕过外部 reader、baseline/candidate 独立构建与版本溯源，以及三组逐题配对对比器。
+现有数据、标准答案和评分函数足以支持目标评测。当前工程路径是端到端直接回答、harness 绕过外部 reader、每个包和领域独立构建并留存、以及跨运行离线配对。三臂和 2×2 归因入口已移除；`memory_off` 是 single 的可选开关，只承担隔离 smoke，不承担完整性能对照。
 
 ## 11. 已验证的真实 CLI 行为（2026-09-11）
 

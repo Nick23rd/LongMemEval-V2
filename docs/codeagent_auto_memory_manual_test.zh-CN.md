@@ -1,5 +1,73 @@
 # CodeAgent Auto Memory 手动测试手册
 
+> 当前只保留按 CLI commit 独立执行和留存的单次评测。修改前后使用
+> 不同的包分别运行；三臂和四象限入口已移除。需要关闭记忆时使用
+> 同一个 single 入口的 `--memory-off` 选项。
+
+## 默认：单 CLI、单臂留存评测
+
+源码 launcher 可从其 Git 仓库自动读取 commit：
+
+```powershell
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke `
+  --data-root data/longmemeval-v2 `
+  --output-root runs/codeagent_memory `
+  --runtime free_code `
+  --launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --cli-repo D:/aispace/free-code
+```
+
+打包后的 CLI 若不在 Git 工作区中，显式传入构建对应的 commit：
+
+```powershell
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke `
+  --data-root data/longmemeval-v2 `
+  --output-root runs/codeagent_memory `
+  --launcher '["D:/builds/codeagentcli.exe"]' `
+  --commit-hash 0123456789abcdef0123456789abcdef01234567
+```
+
+每次新运行自动创建：
+
+```text
+<OutputRoot>/<UTC时间>_<commit前12位>[_dirty]/
+  runner_config.json
+  build/
+  evaluate/
+  evaluation_result.json
+  report.html
+```
+
+`runner_config.json` 保存 commit、launcher、CLI 仓库、dirty 状态和启动时间。
+正常运行记录为 `single`，关闭记忆时记录为 `memory_off`；不再使用
+`baseline` 或 `candidate` 作为运行模式。
+中断恢复时使用原参数，并增加 `--resume --run-dir <上次运行目录>`。
+`evaluation_result.json` 是标准 JSON 文档，聚合运行身份、数据选择、构建指标、
+总指标和逐题记录，可直接交给 HTML/前端解析，不需要在浏览器中处理 JSONL。
+打开任意运行目录中的 `report.html`，可一次加载多份 `evaluation_result.json`，
+以第一份为差值基准查看总体指标、分类指标和逐题变化。
+也可以直接打开仓库中的 `evaluation/codeagent_memory_results.html`；两者功能相同。
+
+一个 commit 的完整 small 需要两个独立运行目录：
+
+```powershell
+# Web：100 条共享轨迹构建一份记忆，然后回答 240 题
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset small `
+  --domain web --data-root data/longmemeval-v2 `
+  --output-root runs/codeagent_memory --runtime free_code `
+  --launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --cli-repo D:/aispace/free-code --confirm-full-run
+
+# Enterprise：另建一份记忆，然后回答 211 题
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset small `
+  --domain enterprise --data-root data/longmemeval-v2 `
+  --output-root runs/codeagent_memory --runtime free_code `
+  --launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --cli-repo D:/aispace/free-code --confirm-full-run
+```
+
+两个领域不能共享 memory state。当前真实文件摄取路径曾实测每 100 条构建约 3.54 小时；单题冻结记忆回答样本曾耗时约 287 秒，因此在进一步校准前，Web + Enterprise 串行应保守预留 40～50 小时。experimental historical-session 虽能在约 20～26 分钟转换 100 条轨迹，但当前只是单 user message 包装，不是真实内部多轮 `Message[]`，且召回测试返回 `UNKNOWN`，不能替代默认路径。
+
 > 本文是命令参考，不代表当前方案已具备发布条件。运行 calibration 或 full small 前，请检查[项目状态与下一步](codeagent_memory_project_status.zh-CN.md)中的阻塞项和环境就绪标志。
 
 本文说明如何在 Windows PowerShell 中验证 `codeagent_auto_memory`。建议按“静态检查 → fake CLI 单元测试 → 真实构建冒烟 → 加载记忆评测”的顺序执行。前两步不调用模型；真实构建和评测会产生模型用量。
@@ -88,75 +156,43 @@ $env:DATA_ROOT = 'D:\aispace\LongMemEval-V2\data\longmemeval-v2'
 Test-Path "$env:DATA_ROOT\trajectories.jsonl"
 ```
 
-## 5. 真实构建冒烟测试
+## 5. 真实单臂构建冒烟测试
 
 `--limit 1` 表示选择一道评测题，不表示只处理一条 trajectory。该题 Small haystack 中的全部 trajectory 都会依次形成记忆，因此仍可能耗时并产生较多用量。
 
-如果只需要验证三组工程链路，可使用 `--haystack-limit` 截取每个 haystack 的前 N 条轨迹。该参数会改变正式评测数据，产物中的 `runtime_inputs/data_selection.json` 会标记 `structural_smoke_only: true`，因此结果不得作为 benchmark 分数。
+如果只需要验证工程链路，可使用 `--haystack-limit` 截取每个 haystack 的前 N 条轨迹。该参数会改变正式评测数据，产物中的 `runtime_inputs/data_selection.json` 会标记 `structural_smoke_only: true`，因此结果不得作为 benchmark 分数。
 
-仓库提供 Node/Bun 通用的三组结构冒烟入口：
+默认使用 Node/Bun 通用的单臂入口：
 
 ```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_memory_regression_smoke_01 --haystack-limit 1
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_memory --launcher '["codeagentcli"]' --commit-hash 0123456789abcdef0123456789abcdef01234567 --haystack-limit 1
 ```
 
 脚本依次执行：
 
 ```text
-memory_off 构建与直接回答
-→ baseline 构建与直接回答
-→ candidate 构建与直接回答
-→ 生成三组配对报告
+single 构建并保存冻结记忆
+→ 从冻结记忆启动独立问题 session
+→ 保存逐题结果、运行身份和 evaluation_result.json
 ```
 
-默认选择真实题目 `05cce9b3`。baseline 和 candidate 默认使用同一 binary，仅用于验证流程；正式回归必须通过 launcher、版本标签或提示词文件传入真正的修改前后版本。
+默认选择真实题目 `05cce9b3`。不同版本分别执行 single，之后按 commit 和相同配置离线比较。
 
-对比两个打包后的 CLI：
+### 5.1 无记忆选项
+
+无记忆控制也只运行一个包：
 
 ```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke --data-root data/longmemeval-v2 --output-root runs/packed_cli_comparison_01 --memory-off-launcher '["D:/builds/before/codeagentcli.exe"]' --baseline-launcher '["D:/builds/before/codeagentcli.exe"]' --candidate-launcher '["D:/builds/after/codeagentcli.exe"]' --baseline-version-label before-change --candidate-version-label after-change
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_memory --launcher '["D:/builds/codeagentcli.exe"]' --commit-hash 0123456789abcdef --memory-off
 ```
 
-直接从两个源码仓启动时，传入完整 argv 数组。源码入口必须使用绝对路径：
+目录名增加 `_memory_off`，结果中的 `run.experiment_mode` 为 `memory_off`、
+`run.memory_enabled` 为 `false`。该模式仍执行隔离检查，只用于极小 smoke；
+不要为它运行完整 haystack/full-small。
 
-```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke --data-root data/longmemeval-v2 --output-root runs/source_comparison_01 --memory-off-launcher '["bun","D:/CodeAgent-before/src/cli.ts"]' --baseline-launcher '["bun","D:/CodeAgent-before/src/cli.ts"]' --candidate-launcher '["bun","D:/CodeAgent-after/src/cli.ts"]' --baseline-version-label before-commit-abc123 --candidate-version-label after-commit-def456
-```
-
-源码启动不会把源码仓作为 Agent 工作目录。评测器仍在逐次创建的临时 session 目录中运行进程，只把绝对入口路径作为启动参数。
-
-产物位于：
-
-```text
-<OutputRoot>/memory_off/{build,evaluate}/
-<OutputRoot>/baseline/{build,evaluate}/
-<OutputRoot>/candidate/{build,evaluate}/
-<OutputRoot>/comparison/comparison.json
-<OutputRoot>/comparison/per_question_diff.jsonl
-<OutputRoot>/comparison/report.md
-```
-
-## 5.1 正式 small tier 三组回归
-
-正式入口不会传入 `--haystack-limit`，会使用所选领域完整的 small haystack，并默认评测该领域全部问题。运行成本很高，必须显式提供 `--confirm-full-run`：
-
-```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset small --data-root data/longmemeval-v2 --output-root runs/codeagent_small_web_01 --domain web --memory-off-launcher '["D:/builds/before/codeagentcli.exe"]' --baseline-launcher '["D:/builds/before/codeagentcli.exe"]' --candidate-launcher '["D:/builds/after/codeagentcli.exe"]' --baseline-version-label before-change --candidate-version-label after-change --confirm-full-run
-```
-
-Enterprise 领域应使用新的输出目录单独运行：
-
-```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset small --data-root data/longmemeval-v2 --output-root runs/codeagent_small_enterprise_01 --domain enterprise --memory-off-launcher '["D:/builds/before/codeagentcli.exe"]' --baseline-launcher '["D:/builds/before/codeagentcli.exe"]' --candidate-launcher '["D:/builds/after/codeagentcli.exe"]' --confirm-full-run
-```
-
-正式报告只能来自未设置 `haystack_limit` 的运行。可以检查三组的：
-
-```powershell
-Get-Content '.\runs\codeagent_small_web_01\baseline\build\runtime_inputs\data_selection.json'
-```
-
-预期 `haystack_limit` 为 `null`，`structural_smoke_only` 为 `false`。
+修改前和修改后的包分别重复 single 命令，并确保 domain、tier、题单、模型和
+prompt 一致。runner 不再接受 `regression`、`attribution`、baseline/candidate
+launcher 或写入/召回交叉组合参数。
 
 先用一道题验证完整的记忆形成和保存链路：
 
@@ -341,36 +377,3 @@ Move-Item runs\codeagent_auto_memory_smoke_build runs\codeagent_auto_memory_smok
 ```
 
 这只影响单元测试命令，不影响 backend 本身。
-
-## 写入策略与召回算法独立归因
-
-归因实验使用四个配对单元：
-
-| 单元 | 冻结记忆 | 查询/召回 |
-|---|---|---|
-| AA | 写入版本 A | 召回版本 A |
-| AB | 写入版本 A | 召回版本 B |
-| BA | 写入版本 B | 召回版本 A |
-| BB | 写入版本 B | 召回版本 B |
-
-其中 `BA-AA`、`BB-AB` 是在不同召回端下的写入效果，`AB-AA`、`BB-BA` 是在不同冻结记忆上的召回效果，`BB-BA-AB+AA` 是交互效应。该诊断报告不替代三组端到端回归报告。
-
-先用一题和截断 haystack 验证结构：
-
-```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_attribution_smoke --question-id 05cce9b3 --haystack-limit 3 --writer-a-launcher '["codeagentcli"]' --recall-a-launcher '["codeagentcli"]' --writer-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]' --recall-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]'
-```
-
-源码入口可传多段 argv，例如：
-
-```bash
---writer-b-launcher '["bun","D:/src/CodeAgent/src/cli.ts"]'
-```
-
-结构验证后运行正式 small 全量归因：
-
-```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset small --data-root data/longmemeval-v2 --output-root runs/codeagent_attribution_small --confirm-full-run --writer-a-launcher '["codeagentcli"]' --recall-a-launcher '["codeagentcli"]' --writer-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]' --recall-b-launcher '["D:/path/to/candidate/codeagentcli.exe"]'
-```
-
-结果位于 `attribution/report.html`、`attribution/report.md`、`attribution/attribution.json` 和 `attribution/per_question_attribution.jsonl`。只修改提示词时使用 `--writer-a-ingest-prompt`、`--writer-b-ingest-prompt`、`--recall-a-query-prompt`、`--recall-b-query-prompt` 或对应 answer prompt 参数。

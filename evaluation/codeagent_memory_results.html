@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LongMemEval-V2 多次测评比较</title>
+  <style>
+    :root{color-scheme:light;--ink:#17202a;--muted:#637083;--line:#dce3eb;--panel:#fff;--bg:#f3f6f9;--accent:#1769aa;--good:#177245;--bad:#b42318;--warn:#9a6700}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+    header{padding:32px clamp(20px,5vw,64px) 24px;background:linear-gradient(125deg,#102a43,#1769aa);color:#fff}
+    h1{margin:0 0 6px;font-size:clamp(24px,4vw,38px)}header p{margin:0;opacity:.86}
+    main{max-width:1600px;margin:auto;padding:24px clamp(14px,3vw,42px) 60px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 5px 20px #15324a0c}
+    #drop{border:2px dashed #8ba9c1;text-align:center;padding:28px;cursor:pointer;background:#f8fbfd}#drop.drag{border-color:var(--accent);background:#edf7ff}
+    button,.file-button,select{border:1px solid #b9c6d2;border-radius:8px;background:#fff;color:var(--ink);padding:8px 12px;font:inherit;cursor:pointer}.file-button{display:inline-block;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:650}button:disabled{opacity:.45;cursor:not-allowed}
+    input[type=file]{display:none}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}.toolbar .spacer{flex:1}.hint,.muted{color:var(--muted)}
+    .notice{padding:10px 12px;border-radius:8px;margin-top:12px;background:#fff7e0;color:#6c4b00;display:none}.notice.show{display:block}.error{background:#fff0ee;color:var(--bad)}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;min-width:780px}th,td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#f7f9fb;color:#445365;position:sticky;top:0;z-index:1}tr:last-child td{border-bottom:0}.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.good{color:var(--good);font-weight:650}.bad{color:var(--bad);font-weight:650}.unknown{color:var(--warn);font-weight:650}
+    h2{font-size:18px;margin:0 0 14px}.tag{display:inline-block;border-radius:999px;padding:2px 8px;background:#e7eef5;color:#41566c;font-size:12px}.run-name{font-weight:700;white-space:nowrap}.answer{max-width:340px;white-space:pre-wrap;overflow-wrap:anywhere}.question{min-width:260px;max-width:420px}.hidden{display:none!important}
+    .empty{text-align:center;padding:30px;color:var(--muted)}footer{text-align:center;color:var(--muted);padding:12px}.metric-note{margin:8px 0 0;color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+<header><h1>LongMemEval-V2 测评比较</h1><p>在本地加载多个 evaluation_result.json；数据不会上传。</p></header>
+<main>
+  <section id="drop" class="panel" tabindex="0" role="button">
+    <label class="file-button" for="files">选择多个结果 JSON</label>
+    <input id="files" type="file" accept="application/json,.json" multiple>
+    <div class="hint" style="margin-top:10px">也可以把多个文件拖到这里；第一份结果作为差值基准。</div>
+    <div id="notice" class="notice"></div>
+  </section>
+
+  <section id="summary-panel" class="panel hidden">
+    <h2>运行汇总</h2><div class="table-wrap"><table id="summary"></table></div>
+    <p class="metric-note">Δ准确率相对第一份结果；耗时和 Token 直接读取各次单独评测产物。</p>
+  </section>
+
+  <section id="category-panel" class="panel hidden">
+    <h2>分类准确率</h2><div class="table-wrap"><table id="categories"></table></div>
+  </section>
+
+  <section id="questions-panel" class="panel hidden">
+    <div class="toolbar" style="margin:0 0 14px"><h2 style="margin:0">逐题比较</h2><span class="spacer"></span>
+      <label>显示 <select id="filter"><option value="all">全部题目</option><option value="changed">结果有变化</option><option value="regressed">相对首份退化</option><option value="improved">相对首份改进</option><option value="unknown">包含 UNKNOWN</option></select></label>
+      <button id="clear">清空</button>
+    </div>
+    <div class="table-wrap"><table id="questions"></table></div>
+    <div id="empty-filter" class="empty hidden">当前筛选没有题目。</div>
+  </section>
+</main>
+<footer>独立静态页面 · FileReader 本地解析 · 不依赖网络服务</footer>
+<script>
+(() => {
+  "use strict";
+  const expectedType = "longmemeval_v2_codeagent_single_run";
+  const state = { runs: [] };
+  const $ = id => document.getElementById(id);
+  const escText = value => value == null ? "—" : String(value);
+  const path = (obj, keys, fallback=null) => keys.reduce((v,k) => v != null ? v[k] : null, obj) ?? fallback;
+  const pct = value => Number.isFinite(Number(value)) ? `${(Number(value)*100).toFixed(2)}%` : "—";
+  const num = (value, digits=1) => Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN", {maximumFractionDigits:digits}) : "—";
+  const cell = (tag, value, cls="") => { const el=document.createElement(tag); el.textContent=escText(value); if(cls) el.className=cls; return el; };
+  const baseLabel = run => {
+    const id=path(run.data,["run","identity"],{}), cfg=path(run.data,["run","config"],{});
+    return cfg["version-label"] || id.detected_version || id.short_commit_hash || String(id.commit_hash || run.file).slice(0,12);
+  };
+  const label = run => { const base=baseLabel(run), same=state.runs.filter(item=>baseLabel(item)===base); return same.length>1?`${base} #${same.indexOf(run)+1}`:base; };
+  const questionMap = run => new Map((run.data.questions || []).map(q => [q.question_id,q]));
+  const overall = run => path(run.data,["metrics","overall","overall_full_set"],path(run.data,["metrics","overall","accuracy"],null));
+  const unknownRate = run => { const q=run.data.questions||[]; return q.length ? q.filter(x=>x.is_unknown).length/q.length : null; };
+  const addRow = (table, values, header=false) => { const tr=document.createElement("tr"); values.forEach(v => tr.append(v instanceof Node?v:cell(header?"th":"td",v))); table.append(tr); };
+  function notice(message, error=false){ const el=$("notice"); el.textContent=message; el.className=`notice show${error?" error":""}`; }
+  function clearNotice(){ $("notice").className="notice"; }
+
+  async function loadFiles(files){
+    clearNotice(); const loaded=[]; const errors=[];
+    for(const file of files){
+      try{
+        const data=JSON.parse(await file.text());
+        if(data.document_type!==expectedType || data.schema_version!==1) throw new Error("不是支持的单次测评结果 schema v1");
+        if(!Array.isArray(data.questions) || !data.metrics || !data.run) throw new Error("缺少 run、metrics 或 questions");
+        loaded.push({file:file.name,data});
+      }catch(error){ errors.push(`${file.name}: ${error.message}`); }
+    }
+    state.runs.push(...loaded);
+    if(errors.length) notice(errors.join("；"),true); else if(loaded.length) notice(`已加载 ${loaded.length} 份结果，共 ${state.runs.length} 份。`);
+    render(); $("files").value="";
+  }
+
+  function renderSummary(){
+    const table=$("summary"); table.replaceChildren();
+    addRow(table,["结果","模式","Commit","领域 / Tier","题数","准确率","Δ准确率","UNKNOWN","构建耗时(s)","查询耗时(s)","总 Token"].map(v=>cell("th",v)),true);
+    const base=overall(state.runs[0]);
+    state.runs.forEach(run=>{
+      const d=run.data,id=path(d,["run","identity"],{}),sel=d.selection||{},value=overall(run),delta=value!=null&&base!=null?value-base:null;
+      const build=path(d,["build","ingestion_metrics","total_duration_seconds"],null);
+      const query=path(d,["metrics","memory_query","total_seconds"],null);
+      const tokens=path(d,["metrics","tokens","total_tokens"],null);
+      const deltaCell=cell("td",delta==null?"—":`${delta>=0?"+":""}${(delta*100).toFixed(2)} pp`,delta>0?"num good":delta<0?"num bad":"num");
+      addRow(table,[cell("td",label(run),"run-name"),cell("td",path(d,["run","experiment_mode"])),cell("td",String(id.commit_hash||"—").slice(0,12)),cell("td",`${sel.domain||"—"} / ${sel.tier||path(d,["run","config","preset"],"—")}`),cell("td",(d.questions||[]).length,"num"),cell("td",pct(value),"num"),deltaCell,cell("td",pct(unknownRate(run)),"num"),cell("td",num(build),"num"),cell("td",num(query),"num"),cell("td",num(tokens,0),"num")]);
+    });
+  }
+
+  function renderCategories(){
+    const categories=[...new Set(state.runs.flatMap(r=>(r.data.questions||[]).map(q=>q.category||q.question_type||"未分类")))].sort();
+    const table=$("categories"); table.replaceChildren();
+    addRow(table,[cell("th","分类"),...state.runs.map(r=>cell("th",label(r)))],true);
+    categories.forEach(category=>{
+      const values=state.runs.map(run=>{ const rows=(run.data.questions||[]).filter(q=>(q.category||q.question_type||"未分类")===category); const value=rows.length?rows.reduce((s,q)=>s+Number(q.score||0),0)/rows.length:null; return cell("td",`${pct(value)} (${rows.length})`,"num"); });
+      addRow(table,[cell("td",category),...values]);
+    });
+  }
+
+  function status(q){ return q?.is_unknown?"UNKNOWN":q?.score_bool||Number(q?.score)===1?"正确":"错误"; }
+  function filterQuestion(qs){
+    const mode=$("filter").value, base=qs[0], baseScore=Number(base?.score||0), scores=qs.map(q=>Number(q?.score||0));
+    if(mode==="changed") return new Set(scores).size>1 || new Set(qs.map(status)).size>1;
+    if(mode==="regressed") return qs.slice(1).some(q=>Number(q?.score||0)<baseScore);
+    if(mode==="improved") return qs.slice(1).some(q=>Number(q?.score||0)>baseScore);
+    if(mode==="unknown") return qs.some(q=>q?.is_unknown);
+    return true;
+  }
+  function renderQuestions(){
+    const maps=state.runs.map(questionMap), ids=[...new Set(maps.flatMap(m=>[...m.keys()]))];
+    const table=$("questions"); table.replaceChildren();
+    const head=[cell("th","Question ID"),cell("th","类别"),cell("th","题目 / 标准答案")];
+    state.runs.forEach(r=>head.push(cell("th",label(r)))); addRow(table,head,true);
+    let shown=0;
+    ids.forEach(id=>{
+      const qs=maps.map(m=>m.get(id)); if(!filterQuestion(qs)) return; shown++;
+      const ref=qs.find(Boolean)||{}; const prompt=`${ref.question_text||""}\n\n标准答案：${ref.answer_gold??"—"}`.trim();
+      const values=[cell("td",id),cell("td",ref.category||ref.question_type||"—"),cell("td",prompt,"question answer")];
+      qs.forEach(q=>{ if(!q){values.push(cell("td","缺失","bad"));return;} const td=cell("td",""); const s=cell("div",status(q),q.is_unknown?"unknown":Number(q.score||0)===1?"good":"bad"); const a=cell("div",q.response_parsed_boxed??q.response_raw??"—","answer muted"); td.append(s,a); values.push(td); });
+      addRow(table,values);
+    });
+    $("empty-filter").classList.toggle("hidden",shown!==0);
+  }
+  function comparableWarning(){
+    if(state.runs.length<2)return;
+    const signatures=state.runs.map(r=>JSON.stringify({domain:r.data.selection?.domain,tier:r.data.selection?.tier,ids:(r.data.questions||[]).map(q=>q.question_id).sort()}));
+    if(new Set(signatures).size>1) notice("警告：已加载结果的领域、tier 或题目集合不完全一致；逐题表会按 Question ID 合并。",false);
+  }
+  function render(){
+    const visible=state.runs.length>0; ["summary-panel","category-panel","questions-panel"].forEach(id=>$(id).classList.toggle("hidden",!visible));
+    if(!visible)return; renderSummary();renderCategories();renderQuestions();comparableWarning();
+  }
+  $("files").addEventListener("change",e=>loadFiles([...e.target.files]));
+  $("filter").addEventListener("change",renderQuestions);
+  $("clear").addEventListener("click",()=>{state.runs=[];clearNotice();render();});
+  const drop=$("drop"); drop.addEventListener("click",e=>{if(e.target.tagName!=="LABEL")$("files").click();});
+  drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")$("files").click();});
+  ["dragenter","dragover"].forEach(name=>drop.addEventListener(name,e=>{e.preventDefault();drop.classList.add("drag");}));
+  ["dragleave","drop"].forEach(name=>drop.addEventListener(name,e=>{e.preventDefault();drop.classList.remove("drag");}));
+  drop.addEventListener("drop",e=>loadFiles([...e.dataTransfer.files].filter(f=>f.name.endsWith(".json"))));
+})();
+</script>
+</body>
+</html>

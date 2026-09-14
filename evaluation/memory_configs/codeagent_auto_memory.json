@@ -14,7 +14,7 @@
       "query_max_turns": 20,
       "ingest_max_attempts": 1,
       "query_max_attempts": 3,
-      "experiment_mode": "baseline",
+      "experiment_mode": "single",
       "version_label": null,
       "require_memory_write": false,
       "resume_build": false,

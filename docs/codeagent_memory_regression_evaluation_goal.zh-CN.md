@@ -1,5 +1,10 @@
 # CodeAgent 内部记忆回归评测目标
 
+> 历史设计说明：当前 runner 已移除三臂和四象限入口。修改前后包分别执行
+> `single`；无记忆控制使用单次命令的 `--memory-off`。当前操作方式以
+> [项目状态页](codeagent_memory_project_status.zh-CN.md)和
+> [环境手册](codeagent_memory_evaluation_environment_runbook.zh-CN.md)为准。
+
 ## 1. 背景
 
 本项目需要用于评估 CodeAgent 内部记忆机制的修改效果。典型修改包括：
@@ -198,4 +203,3 @@ B 写入形成的记忆 + 固定召回
 6. 系统自动生成逐题配对 diff 和总体/分类回归指标；
 7. 能区分端到端变化与写入、召回环节的局部变化；
 8. 运行产物足以复现并审计一次版本比较。
-

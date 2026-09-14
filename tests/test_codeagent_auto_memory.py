@@ -36,7 +36,8 @@ def _config(
     trajectories_root: Path,
     *,
     resume_build: bool = False,
-    experiment_mode: str = "baseline",
+    experiment_mode: str = "single",
+    ingestion_strategy: str = "trajectory_file",
 ) -> dict[str, object]:
     return {
         "workspace_dir": str(workspace),
@@ -50,6 +51,7 @@ def _config(
             "ingest_max_attempts": 2,
             "query_max_attempts": 2,
             "experiment_mode": experiment_mode,
+            "ingestion_strategy": ingestion_strategy,
             "require_memory_write": experiment_mode != "memory_off",
             "resume_build": resume_build,
             "extra_args": [],
@@ -171,6 +173,94 @@ def test_free_code_runtime_uses_claude_auto_memory_environment(tmp_path: Path) -
     assert env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "0"
     assert "CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE" not in env
     assert memory.memory_config["memory_params"]["codeagent_auto_memory_params"]["runtime"] == "free_code"
+
+
+def test_historical_session_ingestion_uses_typed_importer_without_main_agent(
+    tmp_path: Path,
+) -> None:
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+    workspace = tmp_path / "workspace"
+    config = _config(
+        workspace,
+        tmp_path,
+        ingestion_strategy="historical_session",
+    )
+    params = config["codeagent_auto_memory_params"]
+    assert isinstance(params, dict)
+    params["runtime"] = "free_code"
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "2.1.87-dev\n", "")
+        cwd = Path(str(kwargs["cwd"]))
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert environment["CLAUDE_CODE_BENCHMARK_HISTORICAL_SESSION"] == "1"
+        assert "--benchmark-historical-session" in command
+        assert "--tools=Read,Write,Edit,Glob,Grep" in command
+        assert "--allowedTools=Read,Write,Edit,Glob,Grep" in command
+        assert "--max-turns" not in command
+        assert "historical work session" not in command[-1]
+        payload_path = Path(command[command.index("--benchmark-historical-session") + 1])
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        assert payload["schema"] == "longmemeval.historical-session.v1"
+        assert command[command.index("--session-id") + 1] == payload["session_id"]
+        assert [message["role"] for message in payload["messages"]] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+            "user",
+        ]
+        memory_dir = Path(environment["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"])
+        (memory_dir / "MEMORY.md").write_text("Locale is zh-CN.\n", encoding="utf-8")
+        import_result = {
+            "schema": "longmemeval.historical-session-import-result.v1",
+            "sessionId": payload["session_id"],
+            "trajectoryId": payload["trajectory_id"],
+            "payloadSha256": "a" * 64,
+            "internalMessageCount": len(payload["messages"]),
+            "mainAgentTurns": 0,
+            "extraction": {
+                "status": "saved",
+                "messageCount": len(payload["messages"]),
+                "durationMs": 12,
+                "turnCount": 2,
+                "writtenPaths": [str(memory_dir / "MEMORY.md")],
+                "memoryPaths": [str(memory_dir / "locale.md")],
+                "usage": {
+                    "inputTokens": 10,
+                    "outputTokens": 2,
+                    "cacheReadInputTokens": 3,
+                    "cacheCreationInputTokens": 4,
+                },
+            },
+        }
+        assert cwd.samefile(payload_path.parent)
+        return subprocess.CompletedProcess(command, 0, json.dumps(import_result), "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(config)
+        memory.insert(_trajectory(screenshot))
+
+    record = memory.ingestion_records[-1]
+    assert record["status"] == "success"
+    assert record["main_agent_turns"] == 0
+    assert record["usage"]["num_turns"] == 2
+    assert (workspace / "auto_memory" / "MEMORY.md").exists()
+
+
+def test_historical_session_ingestion_requires_free_code_runtime(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path / "workspace",
+        tmp_path,
+        ingestion_strategy="historical_session",
+    )
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run"):
+        with pytest.raises(RuntimeError, match="runtime=free_code"):
+            CodeAgentAutoMemory(config)
 
 
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ function fail(message) {
 function parseArgs(argv) {
   const options = { _: [] };
   const booleans = new Set([
-    "all-questions", "full-haystack", "confirm-full-run", "confirm-full-haystack", "resume", "dry-run", "help",
+    "all-questions", "full-haystack", "confirm-full-run", "confirm-full-haystack", "memory-off", "resume", "dry-run", "help",
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -41,17 +41,24 @@ function usage() {
   console.log(`Cross-platform CodeAgent memory evaluation runner
 
 Usage:
-  node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset calibration [options]
-  node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset small [options]
-  node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset small [options]
+  node evaluation/scripts/run_codeagent_memory_eval.mjs [single] --preset smoke [options]
+  node evaluation/scripts/run_codeagent_memory_eval.mjs [single] --preset small [options]
 
 Required:
   --data-root PATH                 Prepared LongMemEval-V2 data root
-  --output-root PATH               New output root (or existing root with --resume)
+  --output-root PATH               Run archive root
 
-Launcher values are JSON argv arrays:
-  --writer-a-launcher '["/opt/codeagent-before/codeagentcli"]'
-  --writer-b-launcher '["bun","/src/CodeAgent/src/cli.ts"]'
+Default single-run launcher:
+  --launcher '["/opt/codeagent/codeagentcli"]'
+  --cli-repo PATH                  CLI git repository when it cannot be inferred from launcher
+  --commit-hash SHA                Explicit CLI commit when it cannot be auto-detected
+  --ingestion-strategy NAME        trajectory_file (default) or historical_session
+  --memory-off                     Run this package once with persistent memory disabled
+
+Single runs are retained under <output-root>/<UTC timestamp>_<commit hash>.
+Use --run-dir with --resume to continue one exact retained run.
+Run the before-change and after-change packages separately with --launcher.
+Every completed run writes evaluation_result.json and a multi-result report.html.
 
 Common options:
   --python PATH                    Auto-detected from .venv when omitted
@@ -94,6 +101,59 @@ function detectPython(options) {
     : join(repoRoot, ".venv", "bin", "python");
   if (existsSync(local)) return local;
   return process.platform === "win32" ? "python" : "python3";
+}
+
+function capture(command, args, cwd = repoRoot) {
+  const result = spawnSync(command, args, {
+    cwd, encoding: "utf8", shell: false, timeout: 10000,
+  });
+  if (result.error || result.status !== 0) return null;
+  return String(result.stdout || result.stderr || "").trim() || null;
+}
+
+function gitIdentity(repoPath) {
+  const absolute = resolve(repoPath);
+  const hash = capture("git", ["-C", absolute, "rev-parse", "HEAD"]);
+  if (!hash || !/^[0-9a-f]{40}$/i.test(hash)) return null;
+  const topLevel = capture("git", ["-C", absolute, "rev-parse", "--show-toplevel"]);
+  const status = capture("git", ["-C", absolute, "status", "--porcelain"]);
+  return { commitHash: hash.toLowerCase(), repo: topLevel ? resolve(topLevel) : absolute, dirty: Boolean(status) };
+}
+
+function inferCliGitIdentity(command) {
+  for (const item of command) {
+    const candidate = resolve(item);
+    if (!existsSync(candidate)) continue;
+    const identity = gitIdentity(candidate);
+    if (identity) return identity;
+    const parentIdentity = gitIdentity(dirname(candidate));
+    if (parentIdentity) return parentIdentity;
+  }
+  return null;
+}
+
+function resolveCliIdentity(options, command) {
+  const explicit = options["commit-hash"];
+  if (explicit && !/^[0-9a-f]{7,40}$/i.test(explicit)) {
+    fail("--commit-hash must contain 7 to 40 hexadecimal characters");
+  }
+  const git = options["cli-repo"] ? gitIdentity(requirePath(options["cli-repo"], "CLI repository")) : inferCliGitIdentity(command);
+  if (options["cli-repo"] && !git) fail(`not a git repository: ${resolve(options["cli-repo"])}`);
+  if (explicit) {
+    if (git && !git.commitHash.startsWith(explicit.toLowerCase())) {
+      fail(`--commit-hash ${explicit} does not match CLI repository HEAD ${git.commitHash}`);
+    }
+    return { commitHash: git?.commitHash ?? explicit.toLowerCase(), repo: git?.repo ?? null, dirty: git?.dirty ?? null, source: "explicit" };
+  }
+  if (git) return { ...git, source: "git" };
+  const version = capture(command[0], [...command.slice(1), "--version"]);
+  const versionHash = version?.match(/\b[0-9a-f]{7,40}\b/i)?.[0];
+  if (versionHash) return { commitHash: versionHash.toLowerCase(), repo: null, dirty: null, source: "version", version };
+  fail("could not determine the specified CLI commit; pass --cli-repo PATH or --commit-hash SHA");
+}
+
+function utcRunTimestamp(date) {
+  return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(".", "");
 }
 
 async function run(command, args, label) {
@@ -142,17 +202,27 @@ function selection(options, preset) {
 }
 
 function commonEvalArgs(options, selected, mode, ingestLauncher, ingestPrompt) {
+  const runtime = options.runtime ?? "codeagent";
+  if (!new Set(["codeagent", "free_code"]).has(runtime)) fail("--runtime must be codeagent or free_code");
+  const ingestionStrategy = options["ingestion-strategy"] ?? "trajectory_file";
+  if (!new Set(["trajectory_file", "historical_session"]).has(ingestionStrategy)) {
+    fail("--ingestion-strategy must be trajectory_file or historical_session");
+  }
+  if (ingestionStrategy === "historical_session" && runtime !== "free_code") {
+    fail("--ingestion-strategy historical_session requires --runtime free_code");
+  }
   const args = [
     join(repoRoot, "evaluation", "run_eval.py"), "--method", "codeagent_auto_memory",
     "--data-root", requirePath(options["data-root"], "data root"), "--domain", selected.domain,
     "--tier", selected.tier, "--codeagent-auto-memory-experiment-mode", mode,
-    "--codeagent-auto-memory-runtime", options.runtime ?? "codeagent",
+    "--codeagent-auto-memory-runtime", runtime,
     "--codeagent-auto-memory-launcher-command-json", JSON.stringify(ingestLauncher),
     "--codeagent-auto-memory-ingest-launcher-command-json", JSON.stringify(ingestLauncher),
     "--codeagent-auto-memory-timeout-seconds", numberOption(options, "timeout-seconds", 1800),
     "--codeagent-auto-memory-ingest-max-turns", numberOption(options, "ingest-max-turns", 60),
     "--codeagent-auto-memory-query-max-turns", numberOption(options, "query-max-turns", 20),
     "--codeagent-auto-memory-ingest-max-attempts", numberOption(options, "ingest-max-attempts", 2),
+    "--codeagent-auto-memory-ingestion-strategy", ingestionStrategy,
     "--codeagent-auto-memory-query-max-attempts", numberOption(options, "query-max-attempts", 2),
   ];
   if (options.model) args.push("--codeagent-auto-memory-model", options.model);
@@ -162,13 +232,13 @@ function commonEvalArgs(options, selected, mode, ingestLauncher, ingestPrompt) {
   return args;
 }
 
-function ensureOutput(options) {
-  if (!options["data-root"] || !options["output-root"]) fail("--data-root and --output-root are required");
-  const output = resolve(options["output-root"]);
+function ensureOutput(options, outputPath = options["output-root"], identity = null) {
+  if (!options["data-root"] || !outputPath) fail("--data-root and --output-root are required");
+  const output = resolve(outputPath);
   if (existsSync(output) && !options.resume) fail(`output root exists; use --resume to continue: ${output}`);
   if (!dryRun) {
     const manifestPath = join(output, "runner_config.json");
-    const ignored = new Set(["resume", "dry-run", "confirm-full-run", "confirm-full-haystack"]);
+    const ignored = new Set(["resume", "run-dir", "dry-run", "confirm-full-run", "confirm-full-haystack"]);
     const normalized = Object.fromEntries(Object.entries(options)
       .filter(([key]) => !ignored.has(key))
       .map(([key, value]) => [key, key === "data-root" || key === "output-root" ? resolve(value) : value])
@@ -184,114 +254,76 @@ function ensureOutput(options) {
       writeFileSync(manifestPath, `${JSON.stringify({
         schema_version: 1, runner: "run_codeagent_memory_eval.mjs",
         node_version: process.version, platform: process.platform, config: normalized,
+        ...(identity ? { run_identity: identity } : {}),
       }, null, 2)}\n`, "utf8");
     }
   }
   return output;
 }
 
-async function runAttribution(options) {
-  const output = ensureOutput(options);
+async function runSingle(options) {
+  if (!options["output-root"]) fail("--output-root is required");
+  const command = launcher(options, "launcher");
+  const identity = resolveCliIdentity(options, command);
+  const startedAt = new Date();
+  const timestampUtc = startedAt.toISOString();
+  const shortHash = identity.commitHash.slice(0, 12);
+  const mode = options["memory-off"] ? "memory_off" : "single";
+  const generatedName = `${utcRunTimestamp(startedAt)}_${shortHash}${identity.dirty ? "_dirty" : ""}${mode === "memory_off" ? "_memory_off" : ""}`;
+  if (options.resume && !options["run-dir"]) fail("single-run --resume requires --run-dir PATH");
+  const outputPath = options["run-dir"] ?? join(resolve(options["output-root"]), generatedName);
+  const runIdentity = {
+    timestamp_utc: timestampUtc,
+    commit_hash: identity.commitHash,
+    short_commit_hash: shortHash,
+    commit_source: identity.source,
+    cli_repo: identity.repo,
+    git_dirty: identity.dirty,
+    launcher_command: command,
+    experiment_mode: mode,
+    ...(identity.version ? { detected_version: identity.version } : {}),
+  };
+  const output = ensureOutput(options, outputPath, runIdentity);
   const selected = selection(options, options.preset ?? "smoke");
   const python = detectPython(options);
-  const writerA = launcher(options, "writer-a-launcher");
-  const writerB = launcher(options, "writer-b-launcher");
-  const recallA = launcher(options, "recall-a-launcher");
-  const recallB = launcher(options, "recall-b-launcher");
-
-  async function build(name, mode, writer, prompt) {
-    const buildDir = join(output, name, "build");
-    if (options.resume && existsSync(join(buildDir, "memory_state", "ingestion_manifest.json"))) {
-      console.log(`[${name}] completed memory state found; skipping`); return;
-    }
-    const args = commonEvalArgs(options, selected, mode, writer, prompt);
+  const version = options["version-label"] ?? identity.commitHash;
+  const common = () => {
+    const args = commonEvalArgs(options, selected, mode, command, options["ingest-prompt"]);
+    args.push("--codeagent-auto-memory-version-label", version);
+    addPrompt(args, "--codeagent-auto-memory-query-prompt-file", options["query-prompt"]);
+    addPrompt(args, "--codeagent-auto-memory-direct-answer-prompt-file", options["answer-prompt"]);
+    return args;
+  };
+  const buildDir = join(output, "build");
+  const evalDir = join(output, "evaluate");
+  if (!(options.resume && existsSync(join(buildDir, "memory_state", "ingestion_manifest.json")))) {
+    const args = common();
     if (options.resume && existsSync(join(buildDir, "memory_workspace", "shared", "ingestion_manifest.json"))) {
       args.push("--codeagent-auto-memory-resume-build");
     }
     args.push("--output-dir", buildDir, "--save-memory", "--skip-evaluation");
-    await run(python, args, `${name}:build`);
+    await run(python, args, `${mode}:build`);
   }
-
-  async function evaluate(cell, writerName, mode, writer, ingestPrompt, recall, queryPrompt, answerPrompt) {
-    const evalDir = join(output, cell, "evaluate");
-    if (options.resume && existsSync(join(evalDir, "per_question.jsonl"))) {
-      console.log(`[${cell}] completed evaluation found; skipping`); return;
-    }
-    const args = commonEvalArgs(options, selected, mode, writer, ingestPrompt);
-    args.push("--codeagent-auto-memory-query-launcher-command-json", JSON.stringify(recall));
-    args.push("--codeagent-auto-memory-allow-query-override-on-load");
-    addPrompt(args, "--codeagent-auto-memory-query-prompt-file", queryPrompt);
-    addPrompt(args, "--codeagent-auto-memory-direct-answer-prompt-file", answerPrompt);
-    args.push("--output-dir", evalDir, "--load-memory-dir", join(output, writerName, "build", "memory_state"));
-    await run(python, args, `${cell}:evaluate`);
+  if (!(options.resume && existsSync(join(evalDir, "per_question.jsonl")))) {
+    const args = common();
+    args.push("--output-dir", evalDir, "--load-memory-dir", join(buildDir, "memory_state"));
+    await run(python, args, `${mode}:evaluate`);
   }
-
-  await build("writer_a", "baseline", writerA, options["writer-a-ingest-prompt"]);
-  await build("writer_b", "candidate", writerB, options["writer-b-ingest-prompt"]);
-  await evaluate("aa", "writer_a", "baseline", writerA, options["writer-a-ingest-prompt"], recallA, options["recall-a-query-prompt"], options["recall-a-answer-prompt"]);
-  await evaluate("ab", "writer_a", "baseline", writerA, options["writer-a-ingest-prompt"], recallB, options["recall-b-query-prompt"], options["recall-b-answer-prompt"]);
-  await evaluate("ba", "writer_b", "candidate", writerB, options["writer-b-ingest-prompt"], recallA, options["recall-a-query-prompt"], options["recall-a-answer-prompt"]);
-  await evaluate("bb", "writer_b", "candidate", writerB, options["writer-b-ingest-prompt"], recallB, options["recall-b-query-prompt"], options["recall-b-answer-prompt"]);
-  const reportDir = join(output, "attribution");
-  if (!(options.resume && existsSync(join(reportDir, "report.html")))) {
-    await run(python, [join(repoRoot, "evaluation", "compare_memory_attribution.py"),
-      "--aa", join(output, "aa", "evaluate"), "--ab", join(output, "ab", "evaluate"),
-      "--ba", join(output, "ba", "evaluate"), "--bb", join(output, "bb", "evaluate"),
-      "--writer-a-state", join(output, "writer_a", "build", "memory_state"),
-      "--writer-b-state", join(output, "writer_b", "build", "memory_state"),
-      "--output-dir", reportDir], "attribution:report");
-  }
-  console.log(`\nHTML report: ${join(reportDir, "report.html")}`);
-}
-
-async function runRegression(options) {
-  const output = ensureOutput(options);
-  const selected = selection(options, options.preset ?? "smoke");
-  const python = detectPython(options);
-  const groups = [
-    ["memory_off", "memory_off", launcher(options, "memory-off-launcher"), "memory-off"],
-    ["baseline", "baseline", launcher(options, "baseline-launcher"), options["baseline-version-label"] ?? "baseline"],
-    ["candidate", "candidate", launcher(options, "candidate-launcher"), options["candidate-version-label"] ?? "candidate"],
-  ];
-  for (const [name, mode, command, version] of groups) {
-    const buildDir = join(output, name, "build");
-    const evalDir = join(output, name, "evaluate");
-    const ingestPrompt = mode === "candidate" ? options["candidate-ingest-prompt"] : options["baseline-ingest-prompt"];
-    const answerPrompt = mode === "candidate" ? options["candidate-answer-prompt"] : options["baseline-answer-prompt"];
-    const common = () => {
-      const args = commonEvalArgs(options, selected, mode, command, ingestPrompt);
-      args.push("--codeagent-auto-memory-version-label", version);
-      addPrompt(args, "--codeagent-auto-memory-direct-answer-prompt-file", answerPrompt);
-      return args;
-    };
-    if (!(options.resume && existsSync(join(buildDir, "memory_state", "ingestion_manifest.json")))) {
-      const args = common();
-      if (options.resume && existsSync(join(buildDir, "memory_workspace", "shared", "ingestion_manifest.json"))) args.push("--codeagent-auto-memory-resume-build");
-      args.push("--output-dir", buildDir, "--save-memory", "--skip-evaluation");
-      await run(python, args, `${name}:build`);
-    }
-    if (!(options.resume && existsSync(join(evalDir, "per_question.jsonl")))) {
-      const args = common();
-      args.push("--output-dir", evalDir, "--load-memory-dir", join(buildDir, "memory_state"));
-      await run(python, args, `${name}:evaluate`);
-    }
-  }
-  const reportDir = join(output, "comparison");
-  if (!(options.resume && existsSync(join(reportDir, "report.md")))) {
-    await run(python, [join(repoRoot, "evaluation", "compare_memory_regression.py"),
-      "--memory-off", join(output, "memory_off", "evaluate"), "--baseline", join(output, "baseline", "evaluate"),
-      "--candidate", join(output, "candidate", "evaluate"), "--output-dir", reportDir], "regression:report");
-  }
-  console.log(`\nRegression report: ${join(reportDir, "report.md")}`);
+  await run(python, [
+    join(repoRoot, "evaluation", "build_single_run_result.py"),
+    "--run-dir", output,
+  ], `${mode}:result`);
+  console.log(`\nRun directory: ${output}`);
+  console.log(`Result JSON: ${join(output, "evaluation_result.json")}`);
+  console.log(`Comparison HTML: ${join(output, "report.html")}`);
 }
 
 const options = parseArgs(process.argv.slice(2));
-if (options.help || options._.length === 0) { usage(); process.exit(options.help ? 0 : 2); }
+if (options.help) { usage(); process.exit(0); }
 dryRun = Boolean(options["dry-run"]);
-const command = options._[0];
+const command = options._[0] ?? "single";
 try {
-  if (command === "attribution") await runAttribution(options);
-  else if (command === "regression") await runRegression(options);
+  if (command === "single") await runSingle(options);
   else fail(`unknown command: ${command}`);
 } catch (error) {
   console.error(`\nerror: ${error.message}`);

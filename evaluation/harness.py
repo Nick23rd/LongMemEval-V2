@@ -36,6 +36,11 @@ from memory_modules.memory import (  # noqa: E402
     load_memory_config,
     save_memory,
 )
+from memory_modules.native_memory_agent import (  # noqa: E402
+    inject_native_memory_runtime_config,
+    is_native_memory_config,
+    native_memory_class,
+)
 from evaluation.qa_eval_metrics import (  # noqa: E402
     eval_from_spec,
     eval_name,
@@ -274,11 +279,17 @@ def inject_runtime_memory_params(
         "memory_type": memory_config["memory_type"],
         "memory_params": dict(memory_config["memory_params"]),
     }
+    if is_native_memory_config(runtime_config):
+        return inject_native_memory_runtime_config(
+            runtime_config,
+            workspace_dir=workspace_dir,
+            trajectories_path=trajectories_path,
+            query_trace_dir=query_trace_dir,
+        )
     if runtime_config["memory_type"] not in {
         "rag",
         "agentrunbook_r",
         "codex",
-        "codeagent_auto_memory",
         "agentrunbook_c",
         "agentrunbook_c_v2",
     }:
@@ -289,7 +300,7 @@ def inject_runtime_memory_params(
         runtime_config["memory_params"]["trajectories_root_dir"] = str(
             Path(trajectories_path).resolve().parent
         )
-    if runtime_config["memory_type"] in {"codex", "codeagent_auto_memory", "agentrunbook_c", "agentrunbook_c_v2"} and query_trace_dir is not None:
+    if runtime_config["memory_type"] in {"codex", "agentrunbook_c", "agentrunbook_c_v2"} and query_trace_dir is not None:
         runtime_config["memory_params"]["query_trace_dir"] = str(query_trace_dir.resolve())
     if runtime_config["memory_type"] == "agent_runbook":
         generation_params_obj = runtime_config["memory_params"].get("generation_params", {})
@@ -354,13 +365,8 @@ def memory_config_enables_online_learning(memory_config: dict[str, Any] | None) 
 
 
 def memory_config_resumes_stateful_build(memory_config: dict[str, Any] | None) -> bool:
-    if memory_config is None or memory_config.get("memory_type") != "codeagent_auto_memory":
-        return False
-    memory_params = memory_config.get("memory_params")
-    if not isinstance(memory_params, dict):
-        return False
-    params = memory_params.get("codeagent_auto_memory_params")
-    return isinstance(params, dict) and params.get("resume_build") is True
+    memory_cls = native_memory_class(memory_config)
+    return memory_cls is not None and memory_cls.config_resumes_build(memory_config)
 
 
 def get_memory_context_processor() -> Any:
@@ -1167,11 +1173,10 @@ def main() -> None:
         "--prompt-build-max-workers > 1 is not supported when online learning is enabled",
     )
     if args.load_memory_dir is None:
-        if memory_config_template["memory_type"] in {
+        if is_native_memory_config(memory_config_template) or memory_config_template["memory_type"] in {
             "rag",
             "agentrunbook_r",
             "codex",
-            "codeagent_auto_memory",
             "agentrunbook_c",
             "agentrunbook_c_v2",
         }:
@@ -1260,7 +1265,7 @@ def main() -> None:
         if args.load_memory_dir is not None:
             print("All questions share the same haystack, loading shared memory once for all questions.")
             requested_config = memory_config_template
-            if requested_config is not None and requested_config["memory_type"] == "codeagent_auto_memory":
+            if is_native_memory_config(requested_config):
                 requested_config = inject_runtime_memory_params(
                     requested_config,
                     workspace_dir=memory_workspace_root / "shared",

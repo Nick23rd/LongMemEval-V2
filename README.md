@@ -82,31 +82,69 @@ The repository implements the following memory modules:
 - `codeagent_auto_memory`: CodeAgent native auto-memory formation and isolated recall baseline.
 - `agentrunbook_c`: AgentRunbook-C.
 
-### CodeAgent internal-memory regression evaluation
+### CodeAgent internal-memory evaluation
 
-This fork also supports end-to-end `memory_off` / `baseline` / `candidate`
-evaluation and a 2×2 write-versus-recall attribution design for CodeAgent's
-native auto-memory. A fixed 10-question calibration run produces JSON, JSONL,
-Markdown, and standalone HTML reports:
+The default launcher evaluates one specified CLI at a time. Each run is retained
+under a UTC timestamp plus the CLI commit hash, so results from different commits
+can be compared later without rebuilding them as a coupled three-arm job:
+
+```powershell
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke `
+  --data-root data/longmemeval-v2 --output-root runs/codeagent_memory `
+  --launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --cli-repo D:/aispace/free-code
+```
+
+For a packed CLI outside its Git checkout, pass `--commit-hash`. The runner
+auto-detects the repository for source launchers, records whether it is dirty,
+and writes `build/`, `evaluate/`, and `runner_config.json` inside the retained
+run directory. Resume an interrupted run with the original arguments plus
+`--resume --run-dir <retained-run-directory>`.
+
+For a complete small-tier evaluation of one commit, run the command twice with
+separate output archives: once with `--domain web` and once with
+`--domain enterprise`. Each domain builds one shared frozen memory from its 100
+trajectories and then answers all questions in that domain (240 Web and 211
+Enterprise). Do not share memory states between domains.
+
+The current validated trajectory-file ingestion path is correct but expensive:
+one 100-trajectory build took about 3.54 hours. The experimental historical-session
+converter completed 100 trajectories in about 20--26 minutes, but it wrapped the
+history as one user message and failed the subsequent recall check. It is not used
+by the default `single` command and must not be used for benchmark conclusions until
+a true internal multi-turn `Message[]` importer passes the fixed recall calibration.
+
+The runner no longer starts coupled multi-arm jobs. Run the before-change and
+after-change packages independently with the same selection and configuration.
+Use `--memory-off` only when one package needs a no-memory control run:
 
 ```bash
-node evaluation/scripts/run_codeagent_memory_eval.mjs attribution --preset calibration --data-root data/longmemeval-v2 --output-root runs/attribution_calibration_001 --confirm-full-haystack --writer-a-launcher '["/builds/before/codeagentcli"]' --recall-a-launcher '["/builds/before/codeagentcli"]' --writer-b-launcher '["/builds/after/codeagentcli"]' --recall-b-launcher '["/builds/after/codeagentcli"]'
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root data/longmemeval-v2 --output-root runs/codeagent_memory --launcher '["/builds/before/codeagentcli"]' --commit-hash 0123456789abcdef --memory-off
 ```
+
+Each completed run writes `evaluation_result.json`: one valid JSON document
+containing run identity, selection, aggregate metrics, build metadata, and all
+per-question records. An HTML report can load this file directly without
+parsing JSONL.
+
+The same directory also contains `report.html`. Open any one copy and select or
+drop multiple `evaluation_result.json` files to compare independent runs on one
+page, including overall/category accuracy, UNKNOWN rate, latency, token usage,
+and per-question improvements or regressions.
 
 See the [evaluation-environment runbook](docs/codeagent_memory_evaluation_environment_runbook.zh-CN.md)
 for Node/Bun execution, source launchers, prompt-only experiments, recovery with `--resume`, report
 interpretation, and the calibration acceptance criteria.
 
-The runner also supports the `free-code` Claude-compatible source tree. Select
+The runner supports the `free-code` Claude-compatible source tree. Select
 its environment-variable dialect and pass its Bun entrypoint as the launcher:
 
 ```powershell
-node evaluation/scripts/run_codeagent_memory_eval.mjs regression --preset smoke `
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke `
   --data-root data/longmemeval-v2 --output-root runs/free_code_smoke `
   --runtime free_code `
-  --memory-off-launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
-  --baseline-launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
-  --candidate-launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]'
+  --launcher '["bun","D:/aispace/free-code/src/entrypoints/cli.tsx"]' `
+  --cli-repo D:/aispace/free-code
 ```
 
 The `free_code` runtime keeps the caller's existing authentication and user

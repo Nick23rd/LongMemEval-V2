@@ -28,6 +28,15 @@ query_traces/<query_invocation_id>/attempt_*/events.json
 query_traces/<query_invocation_id>/attempt_*/memory_module_output.json
 ```
 
+使用 `run_codeagent_memory_eval.mjs` 的 CodeAgent 单次入口时，运行目录根部还会生成
+`evaluation_result.json`。它把运行身份、选择信息、构建审计、聚合指标和全部逐题
+记录合并为一个标准 JSON 文档，供 HTML 页面直接加载。原有 JSONL 和细粒度审计
+文件继续保留，便于流式写入、恢复和调试。
+
+同目录的 `report.html` 是无外部依赖的多结果查看器。一次加载多份
+`evaluation_result.json` 后，可比较总体与分类准确率、UNKNOWN、耗时、Token，
+并按“变化、退化、改进、包含 UNKNOWN”筛选逐题结果。
+
 ### 2.1 实验配置
 
 `run_args.json` 和 `memory_config.json` 记录本次实验使用的数据、记忆方法、模型、超时、并发和上下文限制等配置。
@@ -241,4 +250,3 @@ LAFS gain = LAFS(参考前沿 ∪ 新方法) - LAFS(参考前沿)
 | LAFS | 不同延迟预算下的最佳准确率 | 衡量方法是否推进准确率—延迟前沿，越高越好 | 使用平均延迟；需与固定参考前沿及相同 tier 比较 |
 | LAFS gain | 新方法相对参考前沿的增益 | 大于 0 表示至少在部分延迟预算下带来新价值 | 不是单纯的准确率排名 |
 | McNemar / 配对 bootstrap | 差异的统计可靠性 | 判断观察到的优势是否可能只是样本波动 | 应同时报告样本量和置信区间 |
-
