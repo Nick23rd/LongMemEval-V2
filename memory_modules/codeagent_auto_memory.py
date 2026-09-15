@@ -56,7 +56,9 @@ CONVERSATION_PROMPT_INGEST_PROMPT = """This is a completed historical work sessi
 
 Read conversation_prompt.txt. It is a deterministic external conversion of one LongMemEval browser trajectory into a plain historical session prompt.
 
-Use your native auto-memory tools to save durable, reusable facts directly supported by that converted session. Do not merely summarize it in your final response. Do not save benchmark mechanics, run paths, this wrapper instruction, or the expected answer.
+Use your native auto-memory tools to save only durable, reusable environment facts directly supported by that converted session. Do not merely summarize it in your final response.
+
+Save facts about external app state, UI workflow, identifiers, settings, results, failure causes, or confirmed exceptions. Do not save benchmark mechanics, run paths, this wrapper instruction, the expected answer, or broad memories about the benchmark user, their identity, preferences, or general behavior. Prefer a small number of concise memory writes over broad summaries.
 """
 
 QUERY_PROMPT = """You are the memory retrieval component for a fixed downstream reader.

@@ -36,7 +36,11 @@ def build_conversation_prompt(trajectory: dict[str, Any]) -> str:
     lines = [
         "This is a completed historical browser work session.",
         "",
-        "The original trajectory will not be available to future sessions. Use your native auto-memory to persist durable, reusable facts directly supported by the goal, observations, actions, and outcome. Do not save this prompt, benchmark mechanics, run paths, or the expected answer.",
+        "The original trajectory will not be available to future sessions. Use your native auto-memory to persist durable, reusable environment facts directly supported by the goal, observations, actions, and outcome.",
+        "",
+        "Save only facts about the external app state, UI workflow, identifiers, settings, results, failure causes, or confirmed exceptions. Do not save benchmark mechanics, run paths, this prompt, the expected answer, or broad memories about the benchmark user, their identity, preferences, or general behavior.",
+        "",
+        "Prefer a small number of concise memory writes over broad summaries.",
         "",
         f"Trajectory ID: {trajectory_id}",
         "",
