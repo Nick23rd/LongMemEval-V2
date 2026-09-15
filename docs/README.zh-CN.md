@@ -12,7 +12,7 @@
 ## 当前状态与实验
 
 - [项目状态与下一步](codeagent_memory_project_status.zh-CN.md)：当前唯一权威状态入口。
-- [free-code Historical-session 摄取方案](free_code_historical_session_ingestion.zh-CN.md)：转换设计、PoC、完整 100 条速度及失败结论。
+- [free-code Historical-session 摄取方案](free_code_historical_session_ingestion.zh-CN.md)：modified-client typed importer 研究、PoC、完整 100 条速度及失败结论；通用黑盒快速路径见项目状态页中的 `conversation_prompt`。
 - [CodeAgent auto-memory 改动摘要](codeagent_auto_memory_changes.zh-CN.md)：早期实现改动记录。
 - [CodeAgent auto-memory 评测计划](codeagent_auto_memory_evaluation_plan.zh-CN.md)：早期计划，仅作历史参考。
 

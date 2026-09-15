@@ -52,7 +52,7 @@ Default single-run launcher:
   --launcher '["/opt/codeagent/codeagentcli"]'
   --cli-repo PATH                  CLI git repository when it cannot be inferred from launcher
   --commit-hash SHA                Explicit CLI commit when it cannot be auto-detected
-  --ingestion-strategy NAME        trajectory_file (default) or historical_session
+  --ingestion-strategy NAME        trajectory_file (default), conversation_prompt, or historical_session
   --memory-off                     Run this package once with persistent memory disabled
 
 Single runs are retained under <output-root>/<UTC timestamp>_<commit hash>.
@@ -205,8 +205,8 @@ function commonEvalArgs(options, selected, mode, ingestLauncher, ingestPrompt) {
   const runtime = options.runtime ?? "codeagent";
   if (!new Set(["codeagent", "free_code"]).has(runtime)) fail("--runtime must be codeagent or free_code");
   const ingestionStrategy = options["ingestion-strategy"] ?? "trajectory_file";
-  if (!new Set(["trajectory_file", "historical_session"]).has(ingestionStrategy)) {
-    fail("--ingestion-strategy must be trajectory_file or historical_session");
+  if (!new Set(["trajectory_file", "conversation_prompt", "historical_session"]).has(ingestionStrategy)) {
+    fail("--ingestion-strategy must be trajectory_file, conversation_prompt, or historical_session");
   }
   if (ingestionStrategy === "historical_session" && runtime !== "free_code") {
     fail("--ingestion-strategy historical_session requires --runtime free_code");

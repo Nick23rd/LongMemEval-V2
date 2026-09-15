@@ -66,6 +66,39 @@ def test_cross_platform_runner_rejects_historical_importer_for_codeagent_runtime
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+def test_cross_platform_runner_accepts_conversation_prompt_for_codeagent_runtime() -> None:
+    repo = Path(__file__).resolve().parents[1]
+    script = repo / "evaluation/scripts/run_codeagent_memory_eval.mjs"
+    output_root = repo / "runs/dry-run-conversation-prompt-not-created"
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            "--preset",
+            "smoke",
+            "--data-root",
+            str(repo / "data/longmemeval-v2"),
+            "--output-root",
+            str(output_root),
+            "--dry-run",
+            "--launcher",
+            '["fake-codeagent"]',
+            "--commit-hash",
+            "0123456789abcdef0123456789abcdef01234567",
+            "--ingestion-strategy",
+            "conversation_prompt",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert '"--codeagent-auto-memory-ingestion-strategy" "conversation_prompt"' in result.stdout
+    assert not output_root.exists()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 def test_cross_platform_runner_supports_one_memory_off_run() -> None:
     repo = Path(__file__).resolve().parents[1]
     script = repo / "evaluation/scripts/run_codeagent_memory_eval.mjs"

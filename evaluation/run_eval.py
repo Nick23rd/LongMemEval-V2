@@ -158,7 +158,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--codeagent-auto-memory-ingestion-strategy",
-        choices=["trajectory_file", "historical_session"],
+        choices=["trajectory_file", "conversation_prompt", "historical_session"],
         default=os.getenv("CODEAGENT_AUTO_MEMORY_INGESTION_STRATEGY", "trajectory_file"),
     )
     parser.add_argument("--codeagent-auto-memory-model", default=os.getenv("CODEAGENT_AUTO_MEMORY_MODEL"))

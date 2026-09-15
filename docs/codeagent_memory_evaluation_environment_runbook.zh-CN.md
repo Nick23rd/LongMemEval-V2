@@ -1,8 +1,8 @@
 # CodeAgent 记忆评测环境运行手册
 
-> 开始前先阅读[项目状态与下一步](codeagent_memory_project_status.zh-CN.md)。截至 2026-09-14，默认流程是按 CLI commit 独立留存的 `single` 单臂评测。正式文件摄取路径可运行但成本很高；experimental historical-session 路径虽快，但完整 100 条召回失败。在真正的内部多轮 `Message[]` importer 和固定 10 题 calibration 通过前，不运行 full small。
+> 开始前先阅读[项目状态与下一步](codeagent_memory_project_status.zh-CN.md)。截至 2026-09-15，默认流程是按 CLI commit 独立留存的 `single` 单臂评测。通用黑盒摄取路径是 `trajectory_file` 和 `conversation_prompt`；modified-client `historical_session` 仅保留为 free-code 上限研究。在固定 10 题 calibration 通过前，不运行 full small。
 
-被测 Agent 默认作为不可修改的黑盒。统一生命周期和闭源产品接入约束见[原生记忆 Agent 黑盒适配协议](native_memory_agent_adapter.zh-CN.md)。原版 CodeAgent/free-code 必须使用默认 `trajectory_file`；只有明确测试修改版 free-code importer 时才启用 `historical_session`。
+被测 Agent 默认作为不可修改的黑盒。统一生命周期和闭源产品接入约束见[原生记忆 Agent 黑盒适配协议](native_memory_agent_adapter.zh-CN.md)。原版 CodeAgent/free-code 及其他 CLI 优先使用 `trajectory_file` 或 `conversation_prompt`；只有明确测试修改版 free-code importer 时才启用 `historical_session`。
 
 ## 1. 执行模型
 
@@ -89,6 +89,8 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset small `
 
 historical-session PoC 的 100 条构建约 20～26 分钟，但它把 normalized events 包装成单个 stdin user message，只有 2/100 session 修改 memory，最终查询返回 `UNKNOWN`。它证明了速度方向，不证明记忆质量；默认 `single` 目前不使用该路径。
 
+`conversation_prompt` 是新的通用快速路径：harness 外部把 trajectory 转为普通历史 browser session prompt，通过 CLI `-p` 输入，并在 attempt 审计目录保存 `conversation_prompt.txt`。它不要求修改客户端源码，可用于支持 headless prompt 和 memory 目录隔离的 CodeAgent/free-code/opencode/pi/闭源 CLI；但仍必须先通过固定门禁，不能直接视为 benchmark-valid。
+
 ## 5. 失败后恢复
 
 single 恢复必须指定原运行目录，并保持其余参数不变：
@@ -106,10 +108,17 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset small ...原有�
 - ingestion 无未解释失败，query 超时/失败为零；
 - query session 看不到 trajectory，且不能修改冻结主记忆；
 - Web 与 Enterprise memory state 完全独立；
+- `conversation_prompt` 产物必须包含 `conversation_prompt.txt`，并按固定 3 条、完整 100 条单题、固定 10 题顺序放行；
 - historical-session 只有在结构化 extraction 状态完整、固定事实覆盖合格且召回答案通过后才能启用；
 - 依次通过固定 3 条、完整 100 条单题和固定 10 题 calibration，才允许启动 full small。
 
-真实 `Message[]` importer 使用 `--ingestion-strategy historical_session` 显式启用，仅支持 `--runtime free_code`。未指定时仍使用 `trajectory_file`。先检查 3 条门禁的命令拼装：
+`conversation_prompt` 使用 `--ingestion-strategy conversation_prompt` 显式启用，不限制 runtime。先检查 smoke 命令拼装：
+
+```powershell
+node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root data/longmemeval-v2 --output-root runs/conversation_prompt_gate_3 --ingestion-strategy conversation_prompt --launcher '["D:/builds/codeagentcli.exe"]' --commit-hash 0123456789abcdef --dry-run
+```
+
+真实 `Message[]` importer 使用 `--ingestion-strategy historical_session` 显式启用，仅支持 `--runtime free_code`。它是 modified-client 研究路径，不是通用黑盒入口。先检查 3 条门禁的命令拼装：
 
 ```powershell
 node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root data/longmemeval-v2 --output-root runs/message_importer_gate_3 --runtime free_code --ingestion-strategy historical_session --launcher '["D:/aispace/free-code/cli-dev.exe"]' --cli-repo D:/aispace/free-code --dry-run

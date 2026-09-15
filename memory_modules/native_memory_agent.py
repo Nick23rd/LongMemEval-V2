@@ -22,6 +22,7 @@ class NativeMemoryCapabilities:
     trajectory_file_ingestion: bool
     fresh_query_session: bool
     frozen_memory_snapshot: bool
+    conversation_prompt_ingestion: bool = False
     historical_session_import: bool = False
     local_memory_state: bool = True
 

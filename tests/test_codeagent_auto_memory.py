@@ -263,6 +263,51 @@ def test_historical_session_ingestion_requires_free_code_runtime(tmp_path: Path)
             CodeAgentAutoMemory(config)
 
 
+def test_conversation_prompt_ingestion_uses_plain_headless_prompt(tmp_path: Path) -> None:
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+    workspace = tmp_path / "workspace"
+    config = _config(
+        workspace,
+        tmp_path,
+        ingestion_strategy="conversation_prompt",
+    )
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "1.2.3\n", "")
+        cwd = Path(str(kwargs["cwd"]))
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert env["CODEAGENT3_DISABLE_AUTO_MEMORY"] == "0"
+        assert "--benchmark-historical-session" not in command
+        assert "--max-turns" in command
+        assert command[command.index("--max-turns") + 1] == "3"
+        prompt = command[-1]
+        assert "This is a completed historical browser work session." in prompt
+        assert "Goal:\nremember the account setting" in prompt
+        assert "Action 0:\nset locale" in prompt
+        assert "Locale: Chinese (Simplified)" in prompt
+        assert "The locale is zh-CN" not in prompt
+        assert not (cwd / "trajectory").exists()
+        assert (cwd / "conversation_prompt.txt").read_text(encoding="utf-8") == prompt
+        memory_dir = Path(env["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"])
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        (memory_dir / "MEMORY.md").write_text("Locale is zh-CN.\n", encoding="utf-8")
+        payload = {"type": "result", "subtype": "success", "result": "Memory saved"}
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload) + "\n", "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(config)
+        memory.insert(_trajectory(screenshot))
+
+    record = memory.ingestion_records[-1]
+    assert record["status"] == "success"
+    assert (workspace / "auto_memory" / "MEMORY.md").exists()
+    audit_prompt = next(workspace.glob("ingestion_sessions/*/attempt_001/conversation_prompt.txt"))
+    assert "remember the account setting" in audit_prompt.read_text(encoding="utf-8")
+
+
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
     screenshot = tmp_path / "state.png"
     screenshot.write_bytes(b"png")

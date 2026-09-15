@@ -1,6 +1,6 @@
 # CodeAgent / free-code 长期记忆评测：项目状态与下一步
 
-> 最后更新：2026-09-14。本文是本分支的权威状态入口。状态冲突时以本文为准。
+> 最后更新：2026-09-15。本文是本分支的权威状态入口。状态冲突时以本文为准。
 
 ## 1. 最终目标
 
@@ -20,7 +20,7 @@ LongMemEval-V2 当前已经具备：
 
 - 通用 `NativeMemoryAgent` 黑盒生命周期和 `NativeMemoryCapabilities` 能力声明；
 - harness 通过通用 native-memory 类型注入隔离目录、加载冻结状态和恢复构建，不再以 `codeagent_auto_memory` 产品名硬编码这些行为；
-- `codeagent_auto_memory` 已作为 `codeagent_cli` 适配器接入；默认 `trajectory_file` 可直接调用未修改的原版 CLI；
+- `codeagent_auto_memory` 已作为 `codeagent_cli` 适配器接入；默认 `trajectory_file` 可直接调用未修改的原版 CLI；新增 `conversation_prompt` 黑盒快速路径，可将 trajectory 在 harness 外部确定性转换为普通历史 session prompt 后通过 CLI `-p` 输入；
 - 默认按 CLI commit 独立执行、留存和恢复的 `single` 单臂评测；
 - Web 与 Enterprise 分领域构建、冻结和加载各自的共享记忆；
 - `--memory-off` 可将同一个 single 入口切换为无记忆单次测评；
@@ -31,7 +31,7 @@ LongMemEval-V2 当前已经具备：
 - `codeagent` 与 `free_code` 两种环境变量方言；
 - Windows/Linux 下 Node/Bun 跨平台入口。
 
-free-code PoC 分支额外加入 headless extraction 初始化、退出前 drain、显式 benchmark historical-session gate，以及 benchmark-only typed `Message[]` importer。LongMemEval runner 已可通过 `--ingestion-strategy historical_session` 选择该路径，并结构化留存 extraction 状态、turns、Token、费用、写入路径和 `mainAgentTurns=0` 断言。该路径现在只作为可选研究分支，不是通用协议要求；闭源 Agent 和原版 CLI 使用默认 `trajectory_file`。
+free-code PoC 分支额外加入 headless extraction 初始化、退出前 drain、显式 benchmark historical-session gate，以及 benchmark-only typed `Message[]` importer。LongMemEval runner 已可通过 `--ingestion-strategy historical_session` 选择该路径，并结构化留存 extraction 状态、turns、Token、费用、写入路径和 `mainAgentTurns=0` 断言。该路径现在只作为修改版客户端研究分支，不是通用协议要求；闭源 Agent 和原版 CLI 应优先使用 `trajectory_file` 或 `conversation_prompt`。
 
 ## 3. 当前阻塞问题
 
@@ -57,7 +57,13 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 2026-09-14 已完成替代实现：Python 将 trajectory 确定性转换为成对的 synthetic `browser_observe` / `browser_action` tool use/result，free-code 在正常 headless 初始化后直接校验 typed schema、构造内部 `Message[]` 并调用 extraction，不再进行返回 `OK` 的主模型调用。无模型单元测试、完整 Python 测试和 `dev-full` 构建已通过；尚未进行真实 3 条门禁，因此不能宣称记忆覆盖问题已经解决。
 
-### 3.3 其他已知问题
+### 3.3 Conversation-prompt 黑盒快速路径
+
+2026-09-15 已新增 `conversation_prompt` ingestion strategy。该路径把每条 trajectory 在 LongMemEval-V2 侧确定性转换为普通文本历史 browser session prompt，经 CLI `-p` 输入被测 Agent，并沿用现有逐 trajectory 独立进程、共享 auto-memory、失败重试、冻结快照和审计机制。每条 attempt 会保存 `conversation_prompt.txt`，方便复核外部实际输入。
+
+该路径不要求修改客户端源码，理论上可用于 CodeAgent、free-code、opencode、pi 和闭源 CLI；但它仍是 prompt 翻译后的历史记录，不是原生 tool transcript。进入正式对比前必须先通过固定 3 条、完整 100 条单题和固定 10 题 calibration，不能把 `--haystack-limit` 或未门禁结果当 benchmark score。
+
+### 3.4 其他已知问题
 
 - 部分 accessibility tree 会超过上下文；PoC 的确定性字符预算可能丢失中部证据。
 - 当前 PoC 为取得正常 `REPLHookContext` 仍有一次只回答 `OK` 的主模型调用。
@@ -69,7 +75,7 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 已验证：每条 trajectory 可以使用独立 session 并只共享 auto-memory；headless extraction 可以写入指定 memory；query 前必须完成初始化，退出前必须 drain；Windows 输入必须使用 UTF-8；100 条可以断点续跑；当前单消息 PoC 速度可接受但答案能力不合格。
 
-已实现但尚未通过真实门禁：内部 `Message[]` importer、synthetic browser tool schema、结构化 extraction 结果及 runner 集成。尚未验证：固定 3 条的记忆覆盖与速度；完整 100 条单题召回；10 题 calibration；修改前后两个包的独立 single 结果；完整 small 的稳定耗时和费用。
+已实现但尚未通过真实门禁：`conversation_prompt` 黑盒快速路径；内部 `Message[]` importer、synthetic browser tool schema、结构化 extraction 结果及 runner 集成。尚未验证：固定 3 条的记忆覆盖与速度；完整 100 条单题召回；10 题 calibration；修改前后两个包的独立 single 结果；完整 small 的稳定耗时和费用。
 
 ## 5. 下一阶段实施计划
 
@@ -99,7 +105,7 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 ### P1：输入预算和可比性
 
-统计轨迹 Token 分布；优先使用消息级上下文管理而非头尾截断；保存截断规则、原始哈希和清单；修改前后两个包使用字节一致输入；默认不注入 `thought`，截图策略单独版本化。
+统计轨迹 Token 分布；优先使用消息级上下文管理而非头尾截断；保存截断规则、原始哈希和清单；修改前后两个包使用字节一致输入；默认不注入 `thought`，截图策略单独版本化。`conversation_prompt` 与 `trajectory_file` 是当前最可行的通用黑盒路径；`historical_session` 仅用于修改版 free-code 上限研究。
 
 ### P2：分级验证
 
@@ -142,6 +148,7 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root
 - prompt hash、trajectory fingerprints、版本标签和 detected version 非空；
 - 失败、超时、空写入和重试数可从产物重算；
 - 模型名称符合计划。本次 PoC 为 `deepseek-flash`，同一实验不得混入 Pro；
+- `conversation_prompt` 必须保存 `conversation_prompt.txt` 且通过固定门禁，才可进入正式 small；
 - experimental historical-session 必须返回结构化 extraction 状态且召回答案通过，才可标记成功。
 
 ## 8. 文档导航

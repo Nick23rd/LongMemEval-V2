@@ -36,6 +36,7 @@ def test_codeagent_uses_generic_native_memory_contract() -> None:
             "trajectory_file_ingestion": True,
             "fresh_query_session": True,
             "frozen_memory_snapshot": True,
+            "conversation_prompt_ingestion": True,
             "historical_session_import": True,
             "local_memory_state": True,
         },

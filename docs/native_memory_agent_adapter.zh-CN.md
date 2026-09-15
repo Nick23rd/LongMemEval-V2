@@ -15,7 +15,7 @@ LongMemEval-V2 不要求修改被测 Agent。开源或闭源 Agent 均作为黑�
 5. 查询不得修改冻结主记忆；
 6. Agent 的原始最终回答直接进入评分器。
 
-适配器通过 `NativeMemoryCapabilities` 声明文件摄取、新查询 session、冻结快照、历史 session 导入和本地状态能力。声明会写入 `ingestion_manifest.json`，使受限的闭源接入不会被误当作完整可复现评测。
+适配器通过 `NativeMemoryCapabilities` 声明文件摄取、conversation prompt 摄取、新查询 session、冻结快照、历史 session 导入和本地状态能力。声明会写入 `ingestion_manifest.json`，使受限的闭源接入不会被误当作完整可复现评测。
 
 ## 代码边界
 
@@ -33,4 +33,4 @@ LongMemEval-V2 不要求修改被测 Agent。开源或闭源 Agent 均作为黑�
 
 ## 当前适配器
 
-`codeagent_auto_memory` 已迁移到该协议，适配器名为 `codeagent_cli`。默认 `trajectory_file` 路径只调用原版 CLI；`historical_session` 是修改版 free-code 的可选实验能力，不属于通用协议要求，也不得成为闭源 Agent 的接入前提。
+`codeagent_auto_memory` 已迁移到该协议，适配器名为 `codeagent_cli`。默认 `trajectory_file` 路径只调用原版 CLI；`conversation_prompt` 在仓库外部把 trajectory 转为普通历史 session prompt 后经 CLI `-p` 输入，也保持黑盒边界。`historical_session` 是修改版 free-code 的可选实验能力，不属于通用协议要求，也不得成为闭源 Agent 的接入前提。

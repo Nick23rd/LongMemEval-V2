@@ -13,6 +13,7 @@ from typing import Any
 
 from .memory import AgentAnswer, MemoryConfig, MemoryContextItem, register_memory, require
 from .native_memory_agent import NativeMemoryAgent, NativeMemoryCapabilities
+from .conversation_prompt import build_conversation_prompt
 from .historical_session import build_historical_session_payload
 from .trajectory_store import materialize_prepared_trajectory, prepare_trajectory_insert
 
@@ -25,7 +26,7 @@ DEFAULT_INGEST_MAX_ATTEMPTS = 1
 DEFAULT_QUERY_MAX_ATTEMPTS = 3
 DEFAULT_EXPERIMENT_MODE = "single"
 EXPERIMENT_MODES = {"single", "memory_off"}
-INGESTION_STRATEGIES = {"trajectory_file", "historical_session"}
+INGESTION_STRATEGIES = {"trajectory_file", "conversation_prompt", "historical_session"}
 RUNTIME_ENVIRONMENTS = {
     "codeagent": {
         "memory_path": "CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE",
@@ -138,7 +139,14 @@ def _replace_tree(source: Path, destination: Path) -> None:
 def _copy_audit_files(session_dir: Path, audit_dir: Path) -> None:
     """Keep reproducibility logs without duplicating every memory snapshot."""
     audit_dir.mkdir(parents=True, exist_ok=False)
-    for filename in ("stdout.log", "stderr.log", "summary.json", "question.json", "historical_session.json"):
+    for filename in (
+        "stdout.log",
+        "stderr.log",
+        "summary.json",
+        "question.json",
+        "historical_session.json",
+        "conversation_prompt.txt",
+    ):
         source = session_dir / filename
         if source.exists():
             shutil.copy2(source, audit_dir / filename)
@@ -179,6 +187,7 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
         trajectory_file_ingestion=True,
         fresh_query_session=True,
         frozen_memory_snapshot=True,
+        conversation_prompt_ingestion=True,
         historical_session_import=True,
         local_memory_state=True,
     )
@@ -677,6 +686,19 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
                     session_dir=session_dir,
                     memory_dir=isolated_memory,
                     trajectory=trajectory,
+                )
+            elif self.ingestion_strategy == "conversation_prompt":
+                conversation_prompt = build_conversation_prompt(trajectory)
+                (session_dir / "conversation_prompt.txt").write_text(
+                    conversation_prompt,
+                    encoding="utf-8",
+                )
+                summary = self._run(
+                    session_dir=session_dir,
+                    memory_dir=isolated_memory,
+                    prompt=conversation_prompt,
+                    max_turns=self.ingest_max_turns,
+                    ingestion=True,
                 )
             else:
                 materialize_prepared_trajectory(prepared, session_dir / "trajectory")
