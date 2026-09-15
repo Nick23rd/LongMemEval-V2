@@ -284,13 +284,16 @@ def test_conversation_prompt_ingestion_uses_plain_headless_prompt(tmp_path: Path
         assert "--max-turns" in command
         assert command[command.index("--max-turns") + 1] == "3"
         prompt = command[-1]
-        assert "This is a completed historical browser work session." in prompt
-        assert "Goal:\nremember the account setting" in prompt
-        assert "Action 0:\nset locale" in prompt
-        assert "Locale: Chinese (Simplified)" in prompt
+        assert "This is a completed historical work session." in prompt
+        assert "Read conversation_prompt.txt" in prompt
         assert "The locale is zh-CN" not in prompt
         assert not (cwd / "trajectory").exists()
-        assert (cwd / "conversation_prompt.txt").read_text(encoding="utf-8") == prompt
+        converted = (cwd / "conversation_prompt.txt").read_text(encoding="utf-8")
+        assert "This is a completed historical browser work session." in converted
+        assert "Goal:\nremember the account setting" in converted
+        assert "Action 0:\nset locale" in converted
+        assert "Locale: Chinese (Simplified)" in converted
+        assert "The locale is zh-CN" not in converted
         memory_dir = Path(env["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"])
         memory_dir.mkdir(parents=True, exist_ok=True)
         (memory_dir / "MEMORY.md").write_text("Locale is zh-CN.\n", encoding="utf-8")

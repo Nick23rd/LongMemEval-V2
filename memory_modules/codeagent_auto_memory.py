@@ -52,6 +52,13 @@ The trajectory/ directory is temporary and will disappear after this session. Us
 Save only claims directly supported by this trajectory. Do not add general knowledge or one-off progress. Update related memories instead of duplicating them. If a new observation conflicts with existing memory, retain source ordering and uncertainty rather than silently overwriting it.
 """
 
+CONVERSATION_PROMPT_INGEST_PROMPT = """This is a completed historical work session.
+
+Read conversation_prompt.txt. It is a deterministic external conversion of one LongMemEval browser trajectory into a plain historical session prompt.
+
+Use your native auto-memory tools to save durable, reusable facts directly supported by that converted session. Do not merely summarize it in your final response. Do not save benchmark mechanics, run paths, this wrapper instruction, or the expected answer.
+"""
+
 QUERY_PROMPT = """You are the memory retrieval component for a fixed downstream reader.
 
 Use only auto memory formed by earlier historical sessions to find facts needed to answer question.json. The original trajectories are unavailable. Do not guess from general knowledge.
@@ -696,7 +703,7 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
                 summary = self._run(
                     session_dir=session_dir,
                     memory_dir=isolated_memory,
-                    prompt=conversation_prompt,
+                    prompt=CONVERSATION_PROMPT_INGEST_PROMPT,
                     max_turns=self.ingest_max_turns,
                     ingestion=True,
                 )

@@ -59,7 +59,7 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 ### 3.3 Conversation-prompt 黑盒快速路径
 
-2026-09-15 已新增 `conversation_prompt` ingestion strategy。该路径把每条 trajectory 在 LongMemEval-V2 侧确定性转换为普通文本历史 browser session prompt，经 CLI `-p` 输入被测 Agent，并沿用现有逐 trajectory 独立进程、共享 auto-memory、失败重试、冻结快照和审计机制。每条 attempt 会保存 `conversation_prompt.txt`，方便复核外部实际输入。
+2026-09-15 已新增 `conversation_prompt` ingestion strategy。该路径把每条 trajectory 在 LongMemEval-V2 侧确定性转换为普通文本历史 browser session prompt，保存为 `conversation_prompt.txt`，再经 CLI `-p` 传入短指令要求被测 Agent 读取该外部转换结果，并沿用现有逐 trajectory 独立进程、共享 auto-memory、失败重试、冻结快照和审计机制。保存文件是为避开 Windows 长 argv 限制，也方便复核实际输入。
 
 该路径不要求修改客户端源码，理论上可用于 CodeAgent、free-code、opencode、pi 和闭源 CLI；但它仍是 prompt 翻译后的历史记录，不是原生 tool transcript。进入正式对比前必须先通过固定 3 条、完整 100 条单题和固定 10 题 calibration，不能把 `--haystack-limit` 或未门禁结果当 benchmark score。
 

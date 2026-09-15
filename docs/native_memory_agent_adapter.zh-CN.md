@@ -33,4 +33,4 @@ LongMemEval-V2 不要求修改被测 Agent。开源或闭源 Agent 均作为黑�
 
 ## 当前适配器
 
-`codeagent_auto_memory` 已迁移到该协议，适配器名为 `codeagent_cli`。默认 `trajectory_file` 路径只调用原版 CLI；`conversation_prompt` 在仓库外部把 trajectory 转为普通历史 session prompt 后经 CLI `-p` 输入，也保持黑盒边界。`historical_session` 是修改版 free-code 的可选实验能力，不属于通用协议要求，也不得成为闭源 Agent 的接入前提。
+`codeagent_auto_memory` 已迁移到该协议，适配器名为 `codeagent_cli`。默认 `trajectory_file` 路径只调用原版 CLI；`conversation_prompt` 在仓库外部把 trajectory 转为普通历史 session prompt 后保存为 `conversation_prompt.txt`，再经 CLI `-p` 短指令输入，也保持黑盒边界。`historical_session` 是修改版 free-code 的可选实验能力，不属于通用协议要求，也不得成为闭源 Agent 的接入前提。
