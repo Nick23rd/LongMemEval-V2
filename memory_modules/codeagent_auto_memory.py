@@ -13,7 +13,7 @@ from typing import Any
 
 from .memory import AgentAnswer, MemoryConfig, MemoryContextItem, register_memory, require
 from .native_memory_agent import NativeMemoryAgent, NativeMemoryCapabilities
-from .conversation_prompt import build_conversation_prompt
+from .conversation_prompt import build_conversation_prompt, build_conversation_prompt_batch
 from .historical_session import build_historical_session_payload
 from .trajectory_store import materialize_prepared_trajectory, prepare_trajectory_insert
 
@@ -59,6 +59,15 @@ Read conversation_prompt.txt. It is a deterministic external conversion of one L
 Use your native auto-memory tools to save only durable, reusable environment facts directly supported by that converted session. Do not merely summarize it in your final response.
 
 Save facts about external app state, UI workflow, identifiers, settings, results, failure causes, or confirmed exceptions. Do not save benchmark mechanics, run paths, this wrapper instruction, the expected answer, or broad memories about the benchmark user, their identity, preferences, or general behavior. Prefer a small number of concise memory writes over broad summaries.
+"""
+
+CONVERSATION_PROMPT_BATCH_INGEST_PROMPT = """This is a batch of completed historical work sessions.
+
+Read conversation_prompt_batch.txt. It contains deterministic compact external conversions of ordered LongMemEval browser trajectories.
+
+Use your native auto-memory tools to save only durable, reusable environment facts directly supported by those converted sessions. Do not merely summarize them in your final response.
+
+Save facts about external app state, UI workflow, identifiers, settings, results, failure causes, or confirmed exceptions. Do not save benchmark mechanics, run paths, this wrapper instruction, expected answers, or broad memories about the benchmark user, their identity, preferences, or general behavior. Prefer concise memory writes that merge related facts across trajectories.
 """
 
 QUERY_PROMPT = """You are the memory retrieval component for a fixed downstream reader.
@@ -155,6 +164,7 @@ def _copy_audit_files(session_dir: Path, audit_dir: Path) -> None:
         "question.json",
         "historical_session.json",
         "conversation_prompt.txt",
+        "conversation_prompt_batch.txt",
     ):
         source = session_dir / filename
         if source.exists():
@@ -185,6 +195,13 @@ def _parse_result(stdout: str) -> tuple[str | None, dict[str, Any] | None, list[
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             usage[key] = value
     return text if isinstance(text, str) else None, usage or None, events
+
+
+def _record_covers_trajectory(record: dict[str, Any], trajectory_id: str) -> bool:
+    if record.get("trajectory_id") == trajectory_id:
+        return True
+    ids = record.get("trajectory_ids")
+    return isinstance(ids, list) and trajectory_id in ids
 
 
 @register_memory
@@ -768,6 +785,116 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
         self.inserted_trajectory_ids.append(prepared.trajectory_id)
         self._write_manifests(status="building")
 
+    def insert_many(
+        self,
+        trajectory_ids: Any,
+        trajectories: dict[str, dict[str, Any]],
+    ) -> bool:
+        if self.ingestion_strategy != "conversation_prompt":
+            return False
+        require(self.workspace_dir is not None and self.trajectories_root_dir is not None, "codeagent_auto_memory requires workspace_dir and trajectories_root_dir")
+        ordered_ids = [str(item) for item in trajectory_ids]
+        pending_ids = [trajectory_id for trajectory_id in ordered_ids if trajectory_id not in self.inserted_trajectory_ids]
+        if not pending_ids:
+            return True
+        prepared_items = [
+            prepare_trajectory_insert(trajectories[trajectory_id], trajectories_root_dir=self.trajectories_root_dir)
+            for trajectory_id in pending_ids
+        ]
+        require(
+            [item.trajectory_id for item in prepared_items] == pending_ids,
+            "Prepared batch trajectory order changed",
+        )
+        main_memory = self.workspace_dir / "auto_memory"
+        before = _memory_snapshot(main_memory)
+        if self.experiment_mode == "memory_off":
+            require(not before, "memory_off requires an empty persistent memory directory")
+        previous_attempts = sum(
+            isinstance(item.get("trajectory_ids"), list)
+            and list(item.get("trajectory_ids", [])) == pending_ids
+            for item in self.ingestion_records
+        )
+        final_record: dict[str, Any] | None = None
+        for invocation_attempt in range(1, self.ingest_max_attempts + 1):
+            attempt = previous_attempts + invocation_attempt
+            batch_name = _safe_name(f"batch_{pending_ids[0]}_{len(pending_ids)}")
+            audit_dir = self.workspace_dir / "ingestion_sessions" / f"batch_{len(self.inserted_trajectory_ids):04d}_{batch_name}" / f"attempt_{attempt:03d}"
+            isolated_root = Path(tempfile.mkdtemp(prefix="longmemeval_codeagent_ingest_batch_"))
+            session_dir = isolated_root / "session"
+            session_dir.mkdir()
+            isolated_memory = session_dir / "auto_memory"
+            shutil.copytree(main_memory, isolated_memory)
+            batch_prompt = build_conversation_prompt_batch(
+                [trajectories[trajectory_id] for trajectory_id in pending_ids]
+            )
+            (session_dir / "conversation_prompt_batch.txt").write_text(
+                batch_prompt,
+                encoding="utf-8",
+            )
+            summary = self._run(
+                session_dir=session_dir,
+                memory_dir=isolated_memory,
+                prompt=CONVERSATION_PROMPT_BATCH_INGEST_PROMPT,
+                max_turns=self.ingest_max_turns,
+                ingestion=True,
+            )
+            after = _memory_snapshot(isolated_memory)
+            changes = _snapshot_diff(before, after)
+            changed = any(changes.values())
+            if summary["returncode"] != 0:
+                status = "failed"
+            elif self.experiment_mode == "memory_off" and changed:
+                status = "isolation_failed"
+            elif self.experiment_mode == "memory_off":
+                status = "success"
+            elif changed:
+                status = "success"
+            else:
+                status = "empty_ingestion"
+            summary.update(
+                {
+                    "trajectory_id": "__batch__",
+                    "trajectory_ids": pending_ids,
+                    "trajectory_fingerprints": {
+                        item.trajectory_id: item.fingerprint for item in prepared_items
+                    },
+                    "attempt": attempt,
+                    "status": status,
+                    "memory_before_digest": _snapshot_digest(before),
+                    "memory_after_digest": _snapshot_digest(after),
+                    "memory_changes": changes,
+                    "batch_ingestion": True,
+                }
+            )
+            _write_json(session_dir / "summary.json", summary)
+            audit_dir.parent.mkdir(parents=True, exist_ok=True)
+            _copy_audit_files(session_dir, audit_dir)
+            if summary["returncode"] == 0 and self.experiment_mode != "memory_off":
+                _replace_tree(isolated_memory, main_memory)
+            shutil.rmtree(isolated_root)
+            self.ingestion_records.append(summary)
+            final_record = summary
+            manifest_status = (
+                "isolation_failed"
+                if status == "isolation_failed"
+                else "building"
+                if summary["returncode"] == 0
+                else "partial_failed"
+            )
+            self._write_manifests(status=manifest_status)
+            if status in {"success", "empty_ingestion", "isolation_failed"}:
+                break
+        require(final_record is not None, "CodeAgent batch ingestion produced no attempt record")
+        if final_record["status"] == "failed":
+            raise RuntimeError(f"CodeAgent batch ingestion failed after {self.ingest_max_attempts} attempts")
+        if final_record["status"] == "isolation_failed":
+            raise RuntimeError("CodeAgent wrote auto-memory while experiment_mode=memory_off during batch ingestion")
+        if self.require_memory_write and final_record["status"] == "empty_ingestion":
+            raise RuntimeError("CodeAgent made no auto-memory change during batch ingestion")
+        self.inserted_trajectory_ids.extend(pending_ids)
+        self._write_manifests(status="building")
+        return True
+
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")
         snapshot = _memory_snapshot(self.workspace_dir / "auto_memory")
@@ -781,7 +908,14 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             for key, value in usage.items():
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     usage_totals[key] = usage_totals.get(key, 0.0) + value
-        final_records = [next(item for item in reversed(self.ingestion_records) if item.get("trajectory_id") == trajectory_id) for trajectory_id in self.inserted_trajectory_ids]
+        final_records = [
+            next(
+                item
+                for item in reversed(self.ingestion_records)
+                if _record_covers_trajectory(item, trajectory_id)
+            )
+            for trajectory_id in self.inserted_trajectory_ids
+        ]
         _write_json(self.workspace_dir / "ingestion_metrics.json", {"trajectory_count": len(self.inserted_trajectory_ids), "attempt_count": len(self.ingestion_records), "success_count": sum(item["status"] == "success" for item in final_records), "empty_ingestion_count": sum(item["status"] == "empty_ingestion" for item in final_records), "failed_attempt_count": sum(item["status"] == "failed" for item in self.ingestion_records), "total_duration_seconds": sum(float(item.get("duration_seconds", 0)) for item in self.ingestion_records), "usage_totals": usage_totals, "memory_file_count": len(snapshot), "memory_total_bytes": sum(item["size"] for item in snapshot.values()), "memory_snapshot": snapshot})
 
     def finalize_build(self) -> None:

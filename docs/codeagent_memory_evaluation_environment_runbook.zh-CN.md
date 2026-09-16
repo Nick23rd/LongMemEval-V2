@@ -89,7 +89,7 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset small `
 
 historical-session PoC 的 100 条构建约 20～26 分钟，但它把 normalized events 包装成单个 stdin user message，只有 2/100 session 修改 memory，最终查询返回 `UNKNOWN`。它证明了速度方向，不证明记忆质量；默认 `single` 目前不使用该路径。
 
-`conversation_prompt` 是新的通用快速路径：harness 外部把 trajectory 转为普通历史 browser session prompt，保存为 `conversation_prompt.txt`，再通过 CLI `-p` 传入短指令让 Agent 读取该转换结果。这样避开 Windows 长 argv 限制，同时保留可审计输入。它不要求修改客户端源码，可用于支持 headless prompt、文件读取和 memory 目录隔离的 CodeAgent/free-code/opencode/pi/闭源 CLI；但仍必须先通过固定门禁，不能直接视为 benchmark-valid。
+`conversation_prompt` 是新的通用快速路径：harness 外部把同一 haystack 的多条 trajectory 转为 compact 历史 browser session prompt，保存为 `conversation_prompt_batch.txt`，再通过一次 CLI `-p` 短指令让 Agent 读取该转换结果。这样避免每条轨迹一次 agent 调用，避开 Windows 长 argv 限制，同时保留可审计输入。它不要求修改客户端源码，可用于支持 headless prompt、文件读取和 memory 目录隔离的 CodeAgent/free-code/opencode/pi/闭源 CLI；但仍必须先通过固定门禁，不能直接视为 benchmark-valid。
 
 ## 5. 失败后恢复
 
@@ -108,7 +108,7 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset small ...原有�
 - ingestion 无未解释失败，query 超时/失败为零；
 - query session 看不到 trajectory，且不能修改冻结主记忆；
 - Web 与 Enterprise memory state 完全独立；
-- `conversation_prompt` 产物必须包含 `conversation_prompt.txt`，并按固定 3 条、完整 100 条单题、固定 10 题顺序放行；
+- `conversation_prompt` 产物必须包含 `conversation_prompt_batch.txt`，`ingestion_metrics.attempt_count` 不能随轨迹数线性增长，并按固定 3 条、完整 100 条单题、固定 10 题顺序放行；
 - historical-session 只有在结构化 extraction 状态完整、固定事实覆盖合格且召回答案通过后才能启用；
 - 依次通过固定 3 条、完整 100 条单题和固定 10 题 calibration，才允许启动 full small。
 

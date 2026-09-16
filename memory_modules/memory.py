@@ -3,7 +3,7 @@ import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 import threading
-from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
+from typing import Any, Iterable, Literal, Protocol, TypedDict, runtime_checkable
 
 
 class MemoryConfig(TypedDict):
@@ -170,6 +170,14 @@ class StatefulMemory(Memory):
     def configure_ingestion_plan(self, metadata: dict[str, object]) -> None:
         """Record how the harness selected and ordered history trajectories."""
         return None
+
+    def insert_many(
+        self,
+        trajectory_ids: Iterable[str],
+        trajectories: dict[str, dict[str, Any]],
+    ) -> bool:
+        """Optionally ingest an ordered trajectory batch in one backend call."""
+        return False
 
     def finalize_build(self) -> None:
         """Freeze a completed history build before queries or persistence."""

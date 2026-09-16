@@ -20,7 +20,7 @@ LongMemEval-V2 当前已经具备：
 
 - 通用 `NativeMemoryAgent` 黑盒生命周期和 `NativeMemoryCapabilities` 能力声明；
 - harness 通过通用 native-memory 类型注入隔离目录、加载冻结状态和恢复构建，不再以 `codeagent_auto_memory` 产品名硬编码这些行为；
-- `codeagent_auto_memory` 已作为 `codeagent_cli` 适配器接入；默认 `trajectory_file` 可直接调用未修改的原版 CLI；新增 `conversation_prompt` 黑盒快速路径，可将 trajectory 在 harness 外部确定性转换为普通历史 session prompt 后通过 CLI `-p` 输入；
+- `codeagent_auto_memory` 已作为 `codeagent_cli` 适配器接入；默认 `trajectory_file` 可直接调用未修改的原版 CLI；新增 `conversation_prompt` 黑盒快速路径，可将一批 trajectory 在 harness 外部确定性转换为 compact 历史 session prompt 文件后，通过一次 CLI `-p` 短指令批量摄取；
 - 默认按 CLI commit 独立执行、留存和恢复的 `single` 单臂评测；
 - Web 与 Enterprise 分领域构建、冻结和加载各自的共享记忆；
 - `--memory-off` 可将同一个 single 入口切换为无记忆单次测评；
@@ -59,7 +59,7 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 ### 3.3 Conversation-prompt 黑盒快速路径
 
-2026-09-15 已新增 `conversation_prompt` ingestion strategy。该路径把每条 trajectory 在 LongMemEval-V2 侧确定性转换为普通文本历史 browser session prompt，保存为 `conversation_prompt.txt`，再经 CLI `-p` 传入短指令要求被测 Agent 读取该外部转换结果，并沿用现有逐 trajectory 独立进程、共享 auto-memory、失败重试、冻结快照和审计机制。保存文件是为避开 Windows 长 argv 限制，也方便复核实际输入。
+2026-09-15 已新增 `conversation_prompt` ingestion strategy。最初版本逐 trajectory 调用 agent，真实 smoke 显示单题耗时和 turn 数仍会随轨迹数线性增长。2026-09-16 已改为 batch ingestion：LongMemEval-V2 侧先把同一 haystack 的多条 trajectory 确定性转换为 `conversation_prompt_batch.txt`，只保留 goal、URL、action、关键可见文本、控件、表单值、alert 和 outcome，再经 CLI `-p` 传入短指令要求被测 Agent 读取该外部转换结果并写入 native memory。该路径不再每条轨迹调用一次 agent；`ingestion_metrics.attempt_count` 记录 agent 调用次数，`trajectory_count` 记录覆盖轨迹数。
 
 该路径不要求修改客户端源码，理论上可用于 CodeAgent、free-code、opencode、pi 和闭源 CLI；但它仍是 prompt 翻译后的历史记录，不是原生 tool transcript。进入正式对比前必须先通过固定 3 条、完整 100 条单题和固定 10 题 calibration，不能把 `--haystack-limit` 或未门禁结果当 benchmark score。
 
@@ -148,7 +148,7 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root
 - prompt hash、trajectory fingerprints、版本标签和 detected version 非空；
 - 失败、超时、空写入和重试数可从产物重算；
 - 模型名称符合计划。本次 PoC 为 `deepseek-flash`，同一实验不得混入 Pro；
-- `conversation_prompt` 必须保存 `conversation_prompt.txt` 且通过固定门禁，才可进入正式 small；
+- `conversation_prompt` 必须保存 `conversation_prompt_batch.txt`，且固定门禁中 `attempt_count` 不能随轨迹数线性增长，才可进入正式 small；
 - experimental historical-session 必须返回结构化 extraction 状态且召回答案通过，才可标记成功。
 
 ## 8. 文档导航

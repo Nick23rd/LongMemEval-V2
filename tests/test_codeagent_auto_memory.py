@@ -311,6 +311,56 @@ def test_conversation_prompt_ingestion_uses_plain_headless_prompt(tmp_path: Path
     assert "remember the account setting" in audit_prompt.read_text(encoding="utf-8")
 
 
+def test_conversation_prompt_build_lifecycle_batches_trajectories(tmp_path: Path) -> None:
+    screenshot = tmp_path / "state.png"
+    screenshot.write_bytes(b"png")
+    workspace = tmp_path / "workspace"
+    ingest_calls = 0
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal ingest_calls
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "1.2.3\n", "")
+        ingest_calls += 1
+        cwd = Path(str(kwargs["cwd"]))
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert not (cwd / "trajectory").exists()
+        batch_prompt = (cwd / "conversation_prompt_batch.txt").read_text(encoding="utf-8")
+        assert "Historical trajectory 1/2" in batch_prompt
+        assert "Historical trajectory 2/2" in batch_prompt
+        assert "traj/one" in batch_prompt
+        assert "traj/two" in batch_prompt
+        assert "Read conversation_prompt_batch.txt" in command[-1]
+        memory_dir = Path(env["CODEAGENT3_COWORK_MEMORY_PATH_OVERRIDE"])
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        (memory_dir / "MEMORY.md").write_text("Batched facts saved.\n", encoding="utf-8")
+        payload = {"type": "result", "subtype": "success", "result": "Batch memory saved"}
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload) + "\n", "")
+
+    with patch("memory_modules.codeagent_auto_memory.subprocess.run", side_effect=fake_run):
+        memory = CodeAgentAutoMemory(
+            _config(workspace, tmp_path, ingestion_strategy="conversation_prompt")
+        )
+        build_stateful_memory(
+            memory,
+            ["traj/one", "traj/two"],
+            {
+                "traj/one": _trajectory(screenshot, "traj/one"),
+                "traj/two": _trajectory(screenshot, "traj/two"),
+            },
+        )
+
+    assert ingest_calls == 1
+    assert memory.inserted_trajectory_ids == ["traj/one", "traj/two"]
+    metrics = json.loads((workspace / "ingestion_metrics.json").read_text(encoding="utf-8"))
+    assert metrics["trajectory_count"] == 2
+    assert metrics["attempt_count"] == 1
+    assert metrics["success_count"] == 2
+    audit_prompt = next(workspace.glob("ingestion_sessions/batch_*/attempt_001/conversation_prompt_batch.txt"))
+    assert "Historical trajectory 2/2" in audit_prompt.read_text(encoding="utf-8")
+
+
 def test_ingestion_query_isolation_and_save_load(tmp_path: Path) -> None:
     screenshot = tmp_path / "state.png"
     screenshot.write_bytes(b"png")

@@ -3,6 +3,10 @@ from __future__ import annotations
 import pytest
 
 from memory_modules.conversation_prompt import build_conversation_prompt
+from memory_modules.conversation_prompt import (
+    build_compact_conversation_prompt,
+    build_conversation_prompt_batch,
+)
 
 
 def test_conversation_prompt_builds_black_box_historical_input() -> None:
@@ -80,3 +84,40 @@ def test_conversation_prompt_truncates_long_observations_deterministically() -> 
     assert "truncated_state_count=1" in prompt
     assert "MIDDLE" not in prompt
     assert prompt == build_conversation_prompt(trajectory)
+
+
+def test_compact_conversation_prompt_keeps_key_ui_text() -> None:
+    trajectory = {
+        "id": "trajectory-compact",
+        "goal": "Change the profile bio.",
+        "outcome": "success",
+        "states": [
+            {
+                "state_index": 0,
+                "url": "https://example.test/profile",
+                "accessibility_tree": "\n".join(
+                    [
+                        "RootWebArea 'Profile'",
+                        "[1] generic container",
+                        "[2] textbox 'Biography' value='Freelance Web Developer'",
+                        "[3] button 'Save'",
+                        "StaticText 'The biography was updated.'",
+                    ]
+                ),
+                "screenshot": "screens/0.png",
+                "action": "click Save",
+                "thought": "private reasoning",
+            }
+        ],
+    }
+
+    compact = build_compact_conversation_prompt(trajectory)
+    batch = build_conversation_prompt_batch([trajectory])
+
+    assert "textbox 'Biography' value='Freelance Web Developer'" in compact
+    assert "button 'Save'" in compact
+    assert "The biography was updated." in compact
+    assert "generic container" not in compact
+    assert "private reasoning" not in compact
+    assert "Historical trajectory 1/1" in batch
+    assert "Change the profile bio." in batch

@@ -39,10 +39,14 @@ def build_stateful_memory(
     """Build and finalize a stateful backend through one explicit lifecycle."""
     plan = resolve_ingestion_plan(trajectory_ids)
     memory.configure_ingestion_plan(plan.metadata)
+    missing = [trajectory_id for trajectory_id in plan.trajectory_ids if trajectory_id not in trajectories]
+    if missing:
+        raise RuntimeError(f"Missing trajectory id in trajectories data: {missing[0]}")
+    if memory.insert_many(plan.trajectory_ids, trajectories):
+        memory.finalize_build()
+        return plan
     iterable = progress(plan.trajectory_ids) if progress is not None else plan.trajectory_ids
     for trajectory_id in iterable:
-        if trajectory_id not in trajectories:
-            raise RuntimeError(f"Missing trajectory id in trajectories data: {trajectory_id}")
         memory.insert(trajectories[trajectory_id])
     memory.finalize_build()
     return plan
