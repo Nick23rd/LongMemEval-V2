@@ -1,6 +1,6 @@
 # CodeAgent / free-code 长期记忆评测：项目状态与下一步
 
-> 最后更新：2026-09-15。本文是本分支的权威状态入口。状态冲突时以本文为准。
+> 最后更新：2026-09-16。本文是本分支的权威状态入口。状态冲突时以本文为准。
 
 ## 1. 最终目标
 
@@ -60,6 +60,8 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 ### 3.3 Conversation-prompt 黑盒快速路径
 
 2026-09-15 已新增 `conversation_prompt` ingestion strategy。最初版本逐 trajectory 调用 agent，真实 smoke 显示单题耗时和 turn 数仍会随轨迹数线性增长。2026-09-16 已改为 batch ingestion：LongMemEval-V2 侧先把同一 haystack 的 trajectory 确定性分批转换为 `conversation_prompt_batch.txt`，只保留 goal、URL、action、关键可见文本、控件、表单值、alert 和 outcome，再经 CLI `-p` 传入短指令要求被测 Agent 读取该外部转换结果并写入 native memory。该路径不再每条轨迹调用一次 agent；默认每 10 条轨迹一个 batch，`ingestion_metrics.attempt_count` 记录 agent 调用次数，`trajectory_count` 记录覆盖轨迹数。100 条单 batch 已实测会在 40 turns 后失败，不能使用。
+
+2026-09-16 的 web/small 固定 10 题、完整 100 条 haystack 构建试跑显示：`conversation_prompt_batch_size=10` 第一批成功、第二批 40 turns 后失败；`conversation_prompt_batch_size=5` 前两批成功，第三批因模型侧 `Insufficient Balance` 失败。5 条一批前两批分别耗时 99.6 秒和 87.8 秒，费用约 $9.37 和 $8.06；第三批失败前已 99.4 秒、44 turns、约 $10.85。按 100 条估算，5 条一批至少需要 20 次 agent 调用，构建阶段成本和失败面仍偏高；当前不应继续进入 full small。
 
 该路径不要求修改客户端源码，理论上可用于 CodeAgent、free-code、opencode、pi 和闭源 CLI；但它仍是 prompt 翻译后的历史记录，不是原生 tool transcript。进入正式对比前必须先通过固定 3 条、完整 100 条单题和固定 10 题 calibration，不能把 `--haystack-limit` 或未门禁结果当 benchmark score。
 
