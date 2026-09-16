@@ -63,6 +63,28 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 2026-09-16 的 web/small 固定 10 题、完整 100 条 haystack 构建试跑显示：`conversation_prompt_batch_size=10` 第一批成功、第二批 40 turns 后失败；`conversation_prompt_batch_size=5` 前两批成功，第三批因模型侧 `Insufficient Balance` 失败。5 条一批前两批分别耗时 99.6 秒和 87.8 秒，费用约 $9.37 和 $8.06；第三批失败前已 99.4 秒、44 turns、约 $10.85。按 100 条估算，5 条一批至少需要 20 次 agent 调用，构建阶段成本和失败面仍偏高；当前不应继续进入 full small。
 
+上述 `conversation_prompt_batch_size=5` 用例在仓库根目录使用以下 PowerShell 命令运行：
+
+```powershell
+$evalPython = if (Test-Path .venv\Scripts\python.exe) { '.venv\Scripts\python.exe' } else { 'python' }
+& $evalPython evaluation\run_eval.py `
+  --method codeagent_auto_memory `
+  --data-root data\longmemeval-v2 `
+  --domain web `
+  --tier small `
+  --question-ids 05cce9b3 06e965cf 00aa905a 06a5a25f 07ab3723 07b49858 0574c69a 01f6e679 0401f0c8 0382ed92 `
+  --output-dir runs\conversation_prompt_web_small_10_full_haystack_a7689bd_b5 `
+  --codeagent-auto-memory-ingestion-strategy conversation_prompt `
+  --codeagent-auto-memory-binary codeagentcli `
+  --codeagent-auto-memory-runtime codeagent `
+  --codeagent-auto-memory-conversation-prompt-batch-size 5 `
+  --codeagent-auto-memory-ingest-max-turns 40 `
+  --codeagent-auto-memory-query-max-turns 10 `
+  --codeagent-auto-memory-timeout-seconds 1800 `
+  --codeagent-auto-memory-ingest-max-attempts 1 `
+  --codeagent-auto-memory-query-max-attempts 1
+```
+
 该路径不要求修改客户端源码，理论上可用于 CodeAgent、free-code、opencode、pi 和闭源 CLI；但它仍是 prompt 翻译后的历史记录，不是原生 tool transcript。进入正式对比前必须先通过固定 3 条、完整 100 条单题和固定 10 题 calibration，不能把 `--haystack-limit` 或未门禁结果当 benchmark score。
 
 ### 3.4 其他已知问题
