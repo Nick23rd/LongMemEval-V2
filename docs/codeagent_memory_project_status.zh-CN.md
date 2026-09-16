@@ -59,7 +59,7 @@ PoC 将 trajectory 确定性转换成 normalized events，丢弃 thought，通�
 
 ### 3.3 Conversation-prompt 黑盒快速路径
 
-2026-09-15 已新增 `conversation_prompt` ingestion strategy。最初版本逐 trajectory 调用 agent，真实 smoke 显示单题耗时和 turn 数仍会随轨迹数线性增长。2026-09-16 已改为 batch ingestion：LongMemEval-V2 侧先把同一 haystack 的多条 trajectory 确定性转换为 `conversation_prompt_batch.txt`，只保留 goal、URL、action、关键可见文本、控件、表单值、alert 和 outcome，再经 CLI `-p` 传入短指令要求被测 Agent 读取该外部转换结果并写入 native memory。该路径不再每条轨迹调用一次 agent；`ingestion_metrics.attempt_count` 记录 agent 调用次数，`trajectory_count` 记录覆盖轨迹数。
+2026-09-15 已新增 `conversation_prompt` ingestion strategy。最初版本逐 trajectory 调用 agent，真实 smoke 显示单题耗时和 turn 数仍会随轨迹数线性增长。2026-09-16 已改为 batch ingestion：LongMemEval-V2 侧先把同一 haystack 的 trajectory 确定性分批转换为 `conversation_prompt_batch.txt`，只保留 goal、URL、action、关键可见文本、控件、表单值、alert 和 outcome，再经 CLI `-p` 传入短指令要求被测 Agent 读取该外部转换结果并写入 native memory。该路径不再每条轨迹调用一次 agent；默认每 10 条轨迹一个 batch，`ingestion_metrics.attempt_count` 记录 agent 调用次数，`trajectory_count` 记录覆盖轨迹数。100 条单 batch 已实测会在 40 turns 后失败，不能使用。
 
 该路径不要求修改客户端源码，理论上可用于 CodeAgent、free-code、opencode、pi 和闭源 CLI；但它仍是 prompt 翻译后的历史记录，不是原生 tool transcript。进入正式对比前必须先通过固定 3 条、完整 100 条单题和固定 10 题 calibration，不能把 `--haystack-limit` 或未门禁结果当 benchmark score。
 
@@ -148,7 +148,7 @@ node evaluation/scripts/run_codeagent_memory_eval.mjs --preset smoke --data-root
 - prompt hash、trajectory fingerprints、版本标签和 detected version 非空；
 - 失败、超时、空写入和重试数可从产物重算；
 - 模型名称符合计划。本次 PoC 为 `deepseek-flash`，同一实验不得混入 Pro；
-- `conversation_prompt` 必须保存 `conversation_prompt_batch.txt`，且固定门禁中 `attempt_count` 不能随轨迹数线性增长，才可进入正式 small；
+- `conversation_prompt` 必须保存 `conversation_prompt_batch.txt`，默认每 10 条 trajectory 一个 batch；固定门禁中 `attempt_count` 应约等于 `ceil(trajectory_count / batch_size)`，才可进入正式 small；
 - experimental historical-session 必须返回结构化 extraction 状态且召回答案通过，才可标记成功。
 
 ## 8. 文档导航

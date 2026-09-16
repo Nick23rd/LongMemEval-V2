@@ -165,6 +165,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codeagent-auto-memory-timeout-seconds", type=float, default=float(os.getenv("CODEAGENT_AUTO_MEMORY_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--codeagent-auto-memory-ingest-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_TURNS", "30")))
     parser.add_argument("--codeagent-auto-memory-query-max-turns", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_MAX_TURNS", "20")))
+    parser.add_argument("--codeagent-auto-memory-conversation-prompt-batch-size", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_CONVERSATION_PROMPT_BATCH_SIZE", "10")))
     parser.add_argument("--codeagent-auto-memory-ingest-max-attempts", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_INGEST_MAX_ATTEMPTS", "1")))
     parser.add_argument("--codeagent-auto-memory-query-max-attempts", type=int, default=int(os.getenv("CODEAGENT_AUTO_MEMORY_QUERY_MAX_ATTEMPTS", "3")))
     parser.add_argument(
@@ -419,6 +420,7 @@ def build_memory_config(args: argparse.Namespace, data_root: Path) -> dict[str, 
                     "timeout_seconds": args.codeagent_auto_memory_timeout_seconds,
                     "ingest_max_turns": args.codeagent_auto_memory_ingest_max_turns,
                     "query_max_turns": args.codeagent_auto_memory_query_max_turns,
+                    "conversation_prompt_batch_size": args.codeagent_auto_memory_conversation_prompt_batch_size,
                     "ingest_max_attempts": args.codeagent_auto_memory_ingest_max_attempts,
                     "query_max_attempts": args.codeagent_auto_memory_query_max_attempts,
                     "experiment_mode": args.codeagent_auto_memory_experiment_mode,

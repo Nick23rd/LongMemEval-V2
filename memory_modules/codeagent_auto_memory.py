@@ -25,6 +25,7 @@ DEFAULT_QUERY_MAX_TURNS = 20
 DEFAULT_INGEST_MAX_ATTEMPTS = 1
 DEFAULT_QUERY_MAX_ATTEMPTS = 3
 DEFAULT_EXPERIMENT_MODE = "single"
+DEFAULT_CONVERSATION_PROMPT_BATCH_SIZE = 10
 EXPERIMENT_MODES = {"single", "memory_off"}
 INGESTION_STRATEGIES = {"trajectory_file", "conversation_prompt", "historical_session"}
 RUNTIME_ENVIRONMENTS = {
@@ -282,6 +283,16 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             "historical_session ingestion requires runtime=free_code",
         )
         self.ingestion_strategy = ingestion_strategy
+        self.conversation_prompt_batch_size = int(
+            params.get(
+                "conversation_prompt_batch_size",
+                DEFAULT_CONVERSATION_PROMPT_BATCH_SIZE,
+            )
+        )
+        require(
+            self.conversation_prompt_batch_size > 0,
+            "codeagent auto-memory conversation_prompt_batch_size must be positive",
+        )
         version_label = params.get("version_label")
         require(
             version_label is None or (isinstance(version_label, str) and version_label.strip()),
@@ -412,6 +423,7 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             "query_max_attempts": self.query_max_attempts,
             "experiment_mode": self.experiment_mode,
             "ingestion_strategy": self.ingestion_strategy,
+            "conversation_prompt_batch_size": self.conversation_prompt_batch_size,
             "version_label": self.version_label,
             "ingest_prompt": self.ingest_prompt,
             "query_prompt": self.query_prompt,
@@ -464,6 +476,7 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             ("runtime", "codeagent"),
             ("experiment_mode", DEFAULT_EXPERIMENT_MODE),
             ("ingestion_strategy", "trajectory_file"),
+            ("conversation_prompt_batch_size", DEFAULT_CONVERSATION_PROMPT_BATCH_SIZE),
             ("version_label", None),
             ("ingest_prompt", INGEST_PROMPT),
             ("query_prompt", QUERY_PROMPT),
@@ -797,27 +810,36 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
         pending_ids = [trajectory_id for trajectory_id in ordered_ids if trajectory_id not in self.inserted_trajectory_ids]
         if not pending_ids:
             return True
+        for batch_start in range(0, len(pending_ids), self.conversation_prompt_batch_size):
+            batch_ids = pending_ids[batch_start : batch_start + self.conversation_prompt_batch_size]
+            self._insert_conversation_prompt_batch(batch_ids, trajectories)
+        return True
+
+    def _insert_conversation_prompt_batch(
+        self,
+        batch_ids: list[str],
+        trajectories: dict[str, dict[str, Any]],
+    ) -> None:
+        require(batch_ids, "Conversation prompt batch must be non-empty")
+        assert self.trajectories_root_dir is not None
         prepared_items = [
             prepare_trajectory_insert(trajectories[trajectory_id], trajectories_root_dir=self.trajectories_root_dir)
-            for trajectory_id in pending_ids
+            for trajectory_id in batch_ids
         ]
-        require(
-            [item.trajectory_id for item in prepared_items] == pending_ids,
-            "Prepared batch trajectory order changed",
-        )
+        require([item.trajectory_id for item in prepared_items] == batch_ids, "Prepared batch trajectory order changed")
         main_memory = self.workspace_dir / "auto_memory"
         before = _memory_snapshot(main_memory)
         if self.experiment_mode == "memory_off":
             require(not before, "memory_off requires an empty persistent memory directory")
         previous_attempts = sum(
             isinstance(item.get("trajectory_ids"), list)
-            and list(item.get("trajectory_ids", [])) == pending_ids
+            and list(item.get("trajectory_ids", [])) == batch_ids
             for item in self.ingestion_records
         )
         final_record: dict[str, Any] | None = None
         for invocation_attempt in range(1, self.ingest_max_attempts + 1):
             attempt = previous_attempts + invocation_attempt
-            batch_name = _safe_name(f"batch_{pending_ids[0]}_{len(pending_ids)}")
+            batch_name = _safe_name(f"batch_{batch_ids[0]}_{len(batch_ids)}")
             audit_dir = self.workspace_dir / "ingestion_sessions" / f"batch_{len(self.inserted_trajectory_ids):04d}_{batch_name}" / f"attempt_{attempt:03d}"
             isolated_root = Path(tempfile.mkdtemp(prefix="longmemeval_codeagent_ingest_batch_"))
             session_dir = isolated_root / "session"
@@ -825,7 +847,7 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             isolated_memory = session_dir / "auto_memory"
             shutil.copytree(main_memory, isolated_memory)
             batch_prompt = build_conversation_prompt_batch(
-                [trajectories[trajectory_id] for trajectory_id in pending_ids]
+                [trajectories[trajectory_id] for trajectory_id in batch_ids]
             )
             (session_dir / "conversation_prompt_batch.txt").write_text(
                 batch_prompt,
@@ -854,7 +876,7 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             summary.update(
                 {
                     "trajectory_id": "__batch__",
-                    "trajectory_ids": pending_ids,
+                    "trajectory_ids": batch_ids,
                     "trajectory_fingerprints": {
                         item.trajectory_id: item.fingerprint for item in prepared_items
                     },
@@ -891,9 +913,8 @@ class CodeAgentAutoMemory(NativeMemoryAgent):
             raise RuntimeError("CodeAgent wrote auto-memory while experiment_mode=memory_off during batch ingestion")
         if self.require_memory_write and final_record["status"] == "empty_ingestion":
             raise RuntimeError("CodeAgent made no auto-memory change during batch ingestion")
-        self.inserted_trajectory_ids.extend(pending_ids)
+        self.inserted_trajectory_ids.extend(batch_ids)
         self._write_manifests(status="building")
-        return True
 
     def _write_manifests(self, *, status: str = "building") -> None:
         require(self.workspace_dir is not None, "codeagent_auto_memory requires workspace_dir")

@@ -66,6 +66,7 @@ Common options:
   --runtime NAME                   Memory environment dialect: codeagent (default) or free_code
   --ingest-max-turns N             Default 60
   --query-max-turns N              Default 20
+  --conversation-prompt-batch-size N Default 10
   --ingest-max-attempts N          Default 2
   --query-max-attempts N           Default 2
   --timeout-seconds N              Default 1800
@@ -221,6 +222,7 @@ function commonEvalArgs(options, selected, mode, ingestLauncher, ingestPrompt) {
     "--codeagent-auto-memory-timeout-seconds", numberOption(options, "timeout-seconds", 1800),
     "--codeagent-auto-memory-ingest-max-turns", numberOption(options, "ingest-max-turns", 60),
     "--codeagent-auto-memory-query-max-turns", numberOption(options, "query-max-turns", 20),
+    "--codeagent-auto-memory-conversation-prompt-batch-size", numberOption(options, "conversation-prompt-batch-size", 10),
     "--codeagent-auto-memory-ingest-max-attempts", numberOption(options, "ingest-max-attempts", 2),
     "--codeagent-auto-memory-ingestion-strategy", ingestionStrategy,
     "--codeagent-auto-memory-query-max-attempts", numberOption(options, "query-max-attempts", 2),
